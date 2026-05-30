@@ -1276,7 +1276,8 @@ function aiReportInstructions(section, reportType = "") {
     "Rewrite only the information supplied by the practitioner.",
     "Do not add, infer, assume, embellish, diagnose, recommend, or create any clinical facts that are not in the notes.",
     "Preserve clinical meaning, uncertainty, names, abbreviations, measurements, timeframes, and equipment details exactly where important.",
-    "Use Australian English and a warm, professional clinical report tone.",
+    "Use Australian English in a polished, professional physiotherapy report tone suitable for case managers, aged care providers, and clinical records.",
+    "Keep the wording concise, objective, respectful, and report-ready. Avoid casual, chatty, promotional, or overly dramatic phrasing.",
     "If the notes are dot points, turn them into one or two polished paragraphs. If the notes are already paragraphs, lightly improve grammar and flow.",
     "Return JSON only with a single key named text."
   ].filter(Boolean).join("\n");
