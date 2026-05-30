@@ -1308,6 +1308,29 @@ label {
   scrollbar-gutter: stable;
 }
 
+.overview-review-list {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.overview-review-list .inbox-card {
+  gap: 7px;
+  overflow: visible;
+  padding: 8px;
+}
+
+.overview-review-list .inbox-card > .meta-row,
+.overview-review-list .inbox-card > .detail-list,
+.overview-review-list .inbox-card > .mini-actions {
+  display: none;
+}
+
+.overview-review-list .inbox-card .section-heading {
+  align-items: start;
+}
+
 .overview-compact-grid > .empty-state {
   grid-column: 1 / -1;
 }
@@ -2411,42 +2434,51 @@ label {
   width: 100%;
 }
 
-.report-review-dropdown summary {
+.report-review-toggle {
   align-items: center;
   background: #f3fbfd;
   border: 1px solid #c7e5ee;
   border-radius: 6px;
+  box-shadow: none;
+  color: inherit;
   cursor: pointer;
   display: flex;
   gap: 8px;
   justify-content: space-between;
-  list-style: none;
   min-height: 36px;
   padding: 7px 9px;
+  text-align: left;
   text-decoration: underline;
   text-decoration-color: rgba(0, 91, 119, 0.35);
   text-underline-offset: 3px;
+  width: 100%;
 }
 
-.report-review-dropdown summary:hover,
-.report-review-dropdown summary:focus-visible {
+.report-review-toggle:hover,
+.report-review-toggle:focus-visible,
+.report-review-dropdown.open .report-review-toggle {
   background: #e8f7fb;
   border-color: #95d4e3;
 }
 
-.report-review-dropdown summary::-webkit-details-marker {
-  display: none;
-}
-
-.report-review-dropdown summary span {
+.report-review-toggle span {
   color: var(--brand-deep);
+  display: grid;
+  gap: 2px;
   font-size: 0.94rem;
   font-weight: 900;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
-.report-review-dropdown summary small {
+.report-review-toggle em {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.report-review-toggle small {
   background: #eef8fb;
   border: 1px solid #c7e5ee;
   border-radius: 999px;

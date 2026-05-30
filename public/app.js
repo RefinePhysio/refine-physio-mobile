@@ -65,6 +65,7 @@ const state = {
   messageThreadUserId: "",
   reportType: "Initial Physiotherapy Assessment Report",
   tabMenuOpen: false,
+  expandedReportReviewId: "",
   tabHistory: []
 };
 
@@ -692,7 +693,7 @@ function renderAdminOverview() {
       </section>
       <section class="section overview-panel">
         <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
-        <div class="overview-compact-grid overview-scroll-grid overview-review-scroll">
+        <div class="overview-scroll-grid overview-review-list">
           ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
         </div>
       </section>
@@ -3757,20 +3758,35 @@ function renderReportReviewDropdown(item, report) {
   const reportId = report?.id || item.sourceId || "";
   const sentAt = report?.adminCopySentAt || report?.signedAt || report?.updatedAt || item.createdAt || report?.createdAt;
   const appointment = report?.appointmentId ? appointmentById(report.appointmentId) : null;
+  const clientLabel = clientName(report?.clientId || item.clientId);
+  const writerLabel = userName(report?.contractorId || item.contractorId);
+  const reportType = report?.type || String(item.title || "").replace(/^Report for review:\s*/i, "") || "Report";
+  const expanded = state.expandedReportReviewId === item.id;
   return `
-    <details class="report-review-dropdown">
-      <summary>
-        <span>${escapeHtml(item.title)}</span>
-        <small>Details</small>
-      </summary>
-      <div class="report-review-dropdown-body">
-        <div><strong>Written by</strong><span>${escapeHtml(userName(report?.contractorId || item.contractorId))}</span></div>
-        <div><strong>Client</strong><span>${escapeHtml(clientName(report?.clientId || item.clientId))}</span></div>
-        <div><strong>Sent to admin</strong><span>${formatDateTime(sentAt)}</span></div>
-        ${appointment ? `<div><strong>Appointment</strong><span>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</span></div>` : ""}
-        <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
-      </div>
-    </details>
+    <div class="report-review-dropdown ${expanded ? "open" : ""}">
+      <button
+        type="button"
+        class="report-review-toggle"
+        data-action="toggle-report-review"
+        data-id="${escapeHtml(item.id)}"
+        aria-expanded="${expanded ? "true" : "false"}"
+      >
+        <span>
+          <strong>${escapeHtml(clientLabel)}</strong>
+          <em>${escapeHtml(reportType)}</em>
+        </span>
+        <small>View details</small>
+      </button>
+      ${expanded ? `
+        <div class="report-review-dropdown-body">
+          <div><strong>Written by</strong><span>${escapeHtml(writerLabel)}</span></div>
+          <div><strong>Client</strong><span>${escapeHtml(clientLabel)}</span></div>
+          <div><strong>Sent to admin</strong><span>${formatDateTime(sentAt)}</span></div>
+          ${appointment ? `<div><strong>Appointment</strong><span>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</span></div>` : ""}
+          <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
+        </div>
+      ` : ""}
+    </div>
   `;
 }
 
@@ -4706,6 +4722,13 @@ function bindViewEvents() {
       state.calendarAppointmentId = "";
       closeCalendarBooking();
       closeUnavailableBlock();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='toggle-report-review']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.expandedReportReviewId = state.expandedReportReviewId === button.dataset.id ? "" : button.dataset.id;
       render();
     });
   });
