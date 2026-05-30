@@ -1166,7 +1166,8 @@ label {
 
 .overview-summary,
 .overview-board,
-.overview-list {
+.overview-list,
+.overview-compact-grid {
   display: grid;
   gap: 12px;
 }
@@ -1266,6 +1267,64 @@ label {
 
 .overview-board {
   margin-top: 12px;
+}
+
+.overview-panel {
+  gap: 10px;
+}
+
+.overview-compact-grid {
+  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 420px));
+  justify-content: start;
+}
+
+.overview-compact-grid > .empty-state {
+  grid-column: 1 / -1;
+}
+
+.overview-compact-grid .card {
+  box-shadow: none;
+}
+
+.overview-compact-grid .approval-card,
+.overview-compact-grid .inbox-card {
+  gap: 8px;
+  padding: 10px;
+}
+
+.overview-compact-grid .approval-card .section-heading,
+.overview-compact-grid .inbox-card .section-heading {
+  align-items: center;
+  gap: 6px;
+}
+
+.overview-compact-grid .approval-card h4,
+.overview-compact-grid .inbox-card h4 {
+  font-size: 0.94rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.overview-compact-grid .approval-card .detail-list,
+.overview-compact-grid .inbox-card .detail-list {
+  gap: 5px;
+  grid-template-columns: 1fr;
+}
+
+.overview-compact-grid .approval-card .mini-actions,
+.overview-compact-grid .inbox-card .mini-actions,
+.overview-compact-grid .inbox-card .actions {
+  gap: 5px;
+}
+
+.overview-compact-grid .approval-card .mini-actions button,
+.overview-compact-grid .inbox-card .mini-actions button,
+.overview-compact-grid .inbox-card .actions button,
+.overview-compact-grid .inbox-card .actions a.button {
+  flex: 1 1 auto;
+  min-height: 32px;
+  padding: 6px 8px;
 }
 
 .overview-list {
@@ -4983,9 +5042,9 @@ tr:last-child td {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .overview-board {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.overview-board {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
 
   .overview-panel-wide {
     grid-column: 1 / -1;

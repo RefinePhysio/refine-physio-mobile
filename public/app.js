@@ -704,13 +704,13 @@ function renderAdminOverview() {
     <div class="overview-board">
       <section class="section overview-panel overview-panel-wide">
         <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
-        <div class="grid">
+        <div class="overview-compact-grid">
           ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
         </div>
       </section>
       <section class="section overview-panel overview-panel-wide">
         <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
-        <div class="grid">
+        <div class="overview-compact-grid">
           ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
         </div>
       </section>
@@ -4005,7 +4005,7 @@ function renderApprovalCard(request) {
   const tone = request.status === "approved" ? "" : request.status === "declined" ? "coral" : "gold";
   const isAdmin = state.data.currentUser.role === "admin";
   return `
-    <article class="card compact">
+    <article class="card compact approval-card">
       <div class="section-heading">
         <h4>${escapeHtml(request.approvalNeedType || request.type)}</h4>
         ${statusPill(approvalStatusLabel(request.status), tone)}
