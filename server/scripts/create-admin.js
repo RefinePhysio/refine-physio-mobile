@@ -20,6 +20,7 @@ const email = normalizeEmail(args.email || process.env.ADMIN_EMAIL || "admin@ref
 const name = String(args.name || process.env.ADMIN_NAME || "Refine Admin").trim();
 const suppliedPassword = args.password || process.env.ADMIN_PASSWORD || "";
 const password = String(suppliedPassword || generatedPassword());
+const isOwner = parseBoolean(args.owner ?? process.env.ADMIN_IS_OWNER ?? "true");
 
 if (!email) throw new Error("Admin email is required.");
 if (password.length < 10) throw new Error("Admin password must be at least 10 characters.");
@@ -46,6 +47,7 @@ if (!admin) {
     clinikoPractitionerId: "",
     clinikoSyncEnabled: false,
     requiresLoginSetup: false,
+    isOwner,
     isActive: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -56,6 +58,7 @@ if (!admin) {
   admin.name = name || admin.name;
   admin.role = "admin";
   admin.discipline = admin.discipline || "Admin";
+  admin.isOwner = isOwner;
   admin.isActive = true;
   admin.requiresLoginSetup = false;
   admin.updatedAt = new Date().toISOString();
@@ -102,6 +105,10 @@ function parseArgs(values) {
 
 function generatedPassword() {
   return `Refine-${randomBytes(12).toString("base64url")}`;
+}
+
+function parseBoolean(value) {
+  return !["false", "0", "no", "off"].includes(String(value || "").trim().toLowerCase());
 }
 
 function emptyDb() {

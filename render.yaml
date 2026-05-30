@@ -25,6 +25,8 @@ services:
         value: katie@refinehealthgroup.com.au
       - key: ADMIN_NAME
         value: Katie Admin
+      - key: ADMIN_IS_OWNER
+        value: "true"
       - key: ADMIN_PASSWORD
         sync: false
       - key: CLINIKO_API_KEY
