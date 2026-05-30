@@ -2786,6 +2786,55 @@ label {
   padding: 10px;
 }
 
+.report-signature-panel {
+  background: #fbfdff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.signature-preview-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.signature-preview-card img {
+  display: block;
+  height: auto;
+  max-height: 70px;
+  max-width: 220px;
+  object-fit: contain;
+}
+
+.signature-preview-card em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.signature-pad-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+#signature-pad {
+  background: #fff;
+  border: 1.5px solid #b7d8e5;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(8, 126, 164, 0.06);
+  cursor: crosshair;
+  height: 160px;
+  touch-action: none;
+  width: 100%;
+}
+
 .equipment-trials {
   background: #fbfcfb;
 }

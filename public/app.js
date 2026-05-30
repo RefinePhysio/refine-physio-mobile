@@ -2305,7 +2305,16 @@ function renderReports() {
   const selectedTemplate = data.reportTemplates.find((template) => template.type === state.reportType) || data.reportTemplates[0];
   const reportFields = selectedTemplate.fields.filter((field) => !["Participant Details", "Therapist Signature"].includes(field));
   const selectedClientId = state.reportClientId || selectedAppointment?.clientId || data.clients[0]?.id || "";
-  const selectedContractorId = state.reportContractorId || selectedAppointment?.contractorId || (data.currentUser.role === "contractor" ? data.currentUser.id : "");
+  const selectedContractorId = state.reportContractorId
+    || selectedAppointment?.contractorId
+    || (data.currentUser.role === "contractor"
+      ? data.currentUser.id
+      : ownerViewingPractitioner()
+      ? currentCalendarPractitionerId()
+      : data.contractors[0]?.id || "");
+  const selectedContractor = data.contractors.find((contractor) => contractor.id === selectedContractorId)
+    || data.users.find((user) => user.id === selectedContractorId)
+    || data.currentUser;
   const existingReport = selectedAppointment ? exactReportForAppointment(selectedAppointment) : null;
   const draftKey = reportDraftKey(selectedAppointment?.id || "", state.reportType);
   const reportFieldsValue = state.reportDraftKey === draftKey
@@ -2336,7 +2345,7 @@ function renderReports() {
           : isEquipmentTrialReport(state.reportType)
           ? renderEquipmentTrialReportFields(reportFieldsValue)
           : reportFields.map((field) => textarea(`field_${fieldKey(field)}`, field, "full", reportFieldsValue[fieldKey(field)] || "")).join("")}
-        ${input("signature", "Digital signature", "text", false, "full", existingReport?.signature || data.currentUser.name)}
+        ${renderReportSignaturePanel(selectedContractor, existingReport)}
         <div class="form-actions full">
           <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
           <button type="submit" name="mode" value="ready_for_admin">${readyForReviewLabel}</button>
@@ -2345,6 +2354,51 @@ function renderReports() {
       </form>
     </section>
   `;
+}
+
+function renderReportSignaturePanel(contractor = {}, existingReport = null) {
+  const currentUser = state.data.currentUser || {};
+  const isOwnSignature = contractor.id === currentUser.id;
+  const savedSignature = isOwnSignature ? currentUser.signatureDataUrl || "" : "";
+  const hasSignature = isOwnSignature ? Boolean(savedSignature) : Boolean(contractor.hasSignature);
+  const printedName = existingReport?.signature || contractor.name || currentUser.name || "";
+  const title = professionalTitleForUser(contractor);
+
+  return `
+    <section class="clinical-block report-signature-panel full">
+      <div class="section-heading">
+        <h4>Signature</h4>
+        ${statusPill(hasSignature ? "saved signature" : "typed name only", hasSignature ? "blue" : "gold")}
+      </div>
+      <p class="form-hint">The final PDF will show the referral thank-you message, Warm regards, your saved drawn signature, then your name and title.</p>
+      ${input("signature", "Name printed on report", "text", false, "full", printedName)}
+      <div class="signature-preview-card">
+        <span>${escapeHtml(REPORT_CLOSING_PREVIEW_TEXT())}</span>
+        <strong>Warm regards,</strong>
+        ${savedSignature
+          ? `<img src="${escapeHtml(savedSignature)}" alt="Saved practitioner signature">`
+          : `<em>${hasSignature ? "Signature saved on therapist profile." : "No drawn signature saved yet."}</em>`}
+        <strong>${escapeHtml(printedName)}</strong>
+        <span>${escapeHtml(title)}</span>
+      </div>
+      ${isOwnSignature ? `
+        <div class="signature-pad-wrap">
+          <canvas id="signature-pad" width="520" height="160" aria-label="Draw signature"></canvas>
+          <div class="mini-actions">
+            <button type="button" class="secondary" data-action="signature-clear-canvas">Clear drawing</button>
+            <button type="button" data-action="signature-save">Save signature</button>
+            ${savedSignature ? `<button type="button" class="secondary" data-action="signature-clear-saved">Remove saved signature</button>` : ""}
+          </div>
+        </div>
+      ` : `
+        <div class="empty-inline">Only the practitioner can add or change their own drawn signature.</div>
+      `}
+    </section>
+  `;
+}
+
+function REPORT_CLOSING_PREVIEW_TEXT() {
+  return "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
 }
 
 function renderInitialPhysioReportFields(appointment, fields = {}) {
@@ -2841,6 +2895,7 @@ function renderUserManagementCard(user) {
             ${statusPill(user.isOwner ? "Owner" : roleLabel(user.role), user.role === "admin" ? "blue" : user.role === "receptionist" ? "gold" : "")}
             ${statusPill(user.isActive ? "active" : "inactive", user.isActive ? "blue" : "coral")}
             ${statusPill(user.hasPassword ? "login ready" : "needs password", user.hasPassword ? "blue" : "gold")}
+            ${user.role === "contractor" ? statusPill(user.hasSignature ? "signature saved" : "no signature", user.hasSignature ? "blue" : "gold") : ""}
           </div>
         </div>
         ${input("name", "Name", "text", true, "", user.name || "")}
@@ -4921,6 +4976,17 @@ function bindViewEvents() {
     });
   });
 
+  bindSignaturePad();
+  document.querySelector("[data-action='signature-save']")?.addEventListener("click", () => {
+    void saveSignatureFromPad();
+  });
+  document.querySelector("[data-action='signature-clear-canvas']")?.addEventListener("click", () => {
+    clearSignaturePad();
+  });
+  document.querySelector("[data-action='signature-clear-saved']")?.addEventListener("click", () => {
+    void clearSavedSignature();
+  });
+
   document.querySelectorAll("input[name^='field_equipmentTrial_'][name$='_chosenModel'], input[name^='field_equipmentTrial_'][name$='_title']").forEach((inputEl) => {
     inputEl.addEventListener("input", updateEquipmentRecommendationsFromForm);
   });
@@ -5364,6 +5430,9 @@ async function submitReport(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const mode = event.submitter?.value || "draft";
+  if (["ready_for_admin", "final"].includes(mode)) {
+    await maybeSaveSignatureFromPad();
+  }
   const payload = formPayload(form);
   payload.fields = fieldPayload(form);
   payload.status = mode;
@@ -5694,6 +5763,135 @@ function removeReportPhotoAttachment(index) {
   preserveReportDraft();
   toast("Photo removed from report PDF");
   render();
+}
+
+function bindSignaturePad() {
+  const canvas = document.querySelector("#signature-pad");
+  if (!canvas) return;
+
+  const context = canvas.getContext("2d");
+  context.lineWidth = 2.4;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = "#1b1b1b";
+
+  let drawing = false;
+  let previousPoint = null;
+
+  const pointForEvent = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height
+    };
+  };
+
+  const begin = (event) => {
+    event.preventDefault();
+    drawing = true;
+    previousPoint = pointForEvent(event);
+    canvas.setPointerCapture?.(event.pointerId);
+  };
+
+  const draw = (event) => {
+    if (!drawing || !previousPoint) return;
+    event.preventDefault();
+    const nextPoint = pointForEvent(event);
+    context.beginPath();
+    context.moveTo(previousPoint.x, previousPoint.y);
+    context.lineTo(nextPoint.x, nextPoint.y);
+    context.stroke();
+    previousPoint = nextPoint;
+    canvas.dataset.hasInk = "true";
+  };
+
+  const end = (event) => {
+    if (!drawing) return;
+    event.preventDefault();
+    drawing = false;
+    previousPoint = null;
+  };
+
+  canvas.addEventListener("pointerdown", begin);
+  canvas.addEventListener("pointermove", draw);
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas.addEventListener("pointerleave", end);
+}
+
+function clearSignaturePad() {
+  const canvas = document.querySelector("#signature-pad");
+  if (!canvas) return;
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  canvas.dataset.hasInk = "";
+}
+
+async function maybeSaveSignatureFromPad() {
+  const canvas = document.querySelector("#signature-pad");
+  if (!canvas || canvas.dataset.hasInk !== "true") return;
+  await saveSignatureFromPad({ quiet: true });
+}
+
+async function saveSignatureFromPad(options = {}) {
+  const canvas = document.querySelector("#signature-pad");
+  if (!canvas || canvas.dataset.hasInk !== "true") {
+    if (!options.quiet) toast("Draw your signature first");
+    return;
+  }
+
+  try {
+    const signature = signaturePadDataUrl(canvas);
+    const result = await fetchJson("/api/users/me/signature", {
+      method: "PATCH",
+      body: signature
+    });
+    applyUpdatedCurrentUser(result.user);
+    clearSignaturePad();
+    if (!options.quiet) {
+      toast("Signature saved");
+      render();
+    }
+  } catch (error) {
+    toast(error.message || "Could not save signature");
+    throw error;
+  }
+}
+
+async function clearSavedSignature() {
+  try {
+    const result = await fetchJson("/api/users/me/signature", {
+      method: "PATCH",
+      body: { clear: true }
+    });
+    applyUpdatedCurrentUser(result.user);
+    clearSignaturePad();
+    toast("Saved signature removed");
+    render();
+  } catch (error) {
+    toast(error.message || "Could not remove signature");
+  }
+}
+
+function signaturePadDataUrl(canvas) {
+  const output = document.createElement("canvas");
+  output.width = canvas.width;
+  output.height = canvas.height;
+  const context = output.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(canvas, 0, 0);
+  return {
+    signatureDataUrl: output.toDataURL("image/jpeg", 0.82),
+    width: output.width,
+    height: output.height
+  };
+}
+
+function applyUpdatedCurrentUser(user) {
+  if (!user || !state.data) return;
+  state.data.currentUser = { ...state.data.currentUser, ...user };
+  state.data.users = (state.data.users || []).map((item) => item.id === user.id ? { ...item, ...user } : item);
+  state.data.contractors = (state.data.contractors || []).map((item) => item.id === user.id ? { ...item, ...user } : item);
 }
 
 async function compressReportPhotoFile(file) {
@@ -7966,6 +8164,12 @@ function clientName(id) {
 
 function userName(id) {
   return state.data.users.find((user) => user.id === id)?.name || "Unknown user";
+}
+
+function professionalTitleForUser(user = {}) {
+  const discipline = String(user.discipline || "").trim();
+  if (!discipline || discipline.toLowerCase() === "physiotherapy") return "Physiotherapist";
+  return discipline;
 }
 
 function truncateText(value, maxLength) {

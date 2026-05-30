@@ -106,6 +106,7 @@ const reportTemplates = [
 ];
 
 const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
+const SIGNATURE_MAX_DATA_URL_LENGTH = 450000;
 
 const appointmentStatuses = ["booked", "confirmed", "completed", "cancelled", "rescheduled", "no-show"];
 const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "paused", "discharged", "declined"];
@@ -239,6 +240,10 @@ function normalizeDb(db) {
     user.email = normalizeEmail(user.email);
     user.isActive = user.isActive !== false;
     user.isOwner = Boolean(user.isOwner);
+    user.signatureDataUrl = sanitizeSignatureDataUrl(user.signatureDataUrl);
+    user.signatureWidth = Number(user.signatureWidth || 0) || 520;
+    user.signatureHeight = Number(user.signatureHeight || 0) || 160;
+    user.signatureUpdatedAt ||= "";
     if (user.password_hash && !user.passwordHash) user.passwordHash = user.password_hash;
     delete user.password_hash;
     if (user.clinikoPractitionerId && typeof user.clinikoSyncEnabled !== "boolean") {
@@ -418,7 +423,7 @@ async function routeApi(req, res, url) {
       return sendJson(res, result.status, { error: result.error });
     }
     await writeDb(db);
-    sendJson(res, 200, { user: publicUser(result.user) }, { "Set-Cookie": sessionCookie(result.token) });
+    sendJson(res, 200, { user: publicUser(result.user, { includeSignature: true }) }, { "Set-Cookie": sessionCookie(result.token) });
     return;
   }
 
@@ -445,7 +450,7 @@ async function routeApi(req, res, url) {
 
   if (method === "GET" && url.pathname === "/api/auth/session") {
     if (!auth?.user) return sendJson(res, 401, { error: "Not signed in" }, { "Set-Cookie": clearSessionCookie() });
-    sendJson(res, 200, { user: publicUser(auth.user) });
+    sendJson(res, 200, { user: publicUser(auth.user, { includeSignature: true }) });
     return;
   }
 
@@ -470,6 +475,15 @@ async function routeApi(req, res, url) {
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     sendJson(res, 200, buildBootstrap(db, auth.user.id));
+    return;
+  }
+
+  if (method === "PATCH" && url.pathname === "/api/users/me/signature") {
+    const body = await readJsonBody(req);
+    const result = updateOwnSignature(db, auth.user.id, body);
+    if (result.error) return sendJson(res, result.status, { error: result.error });
+    await writeDb(db);
+    sendJson(res, 200, { user: publicUser(result.user, { includeSignature: true }) });
     return;
   }
 
@@ -1088,6 +1102,42 @@ async function setUserPassword(db, userId, password, actorId) {
   return { user };
 }
 
+function updateOwnSignature(db, userId, body = {}) {
+  const user = db.users.find((item) => item.id === userId);
+  if (!user) return { status: 404, error: "User not found." };
+
+  const clear = body.clear === true || body.signatureDataUrl === "";
+  if (clear) {
+    user.signatureDataUrl = "";
+    user.signatureWidth = 0;
+    user.signatureHeight = 0;
+    user.signatureUpdatedAt = "";
+    user.updatedAt = new Date().toISOString();
+    logActivity(db, user.id, "cleared_signature", "user", user.id);
+    return { user };
+  }
+
+  const signatureDataUrl = sanitizeSignatureDataUrl(body.signatureDataUrl);
+  if (!signatureDataUrl) {
+    return { status: 400, error: "Please draw and save a signature first." };
+  }
+
+  user.signatureDataUrl = signatureDataUrl;
+  user.signatureWidth = Math.max(1, Math.min(1200, Number(body.width || 520) || 520));
+  user.signatureHeight = Math.max(1, Math.min(500, Number(body.height || 160) || 160));
+  user.signatureUpdatedAt = new Date().toISOString();
+  user.updatedAt = user.signatureUpdatedAt;
+  logActivity(db, user.id, "saved_signature", "user", user.id);
+  return { user };
+}
+
+function sanitizeSignatureDataUrl(value) {
+  const dataUrl = String(value || "").trim();
+  if (!dataUrl) return "";
+  if (dataUrl.length > SIGNATURE_MAX_DATA_URL_LENGTH) return "";
+  return /^data:image\/jpe?g;base64,[A-Za-z0-9+/=]+$/i.test(dataUrl) ? dataUrl : "";
+}
+
 function normalizedRole(role) {
   const value = String(role || "").trim().toLowerCase();
   if (value === "practitioner") return "contractor";
@@ -1100,6 +1150,12 @@ function roleLabel(role) {
     receptionist: "Reception",
     contractor: "Physiotherapy"
   }[role] || "";
+}
+
+function professionalTitleForUser(user = {}) {
+  const discipline = String(user.discipline || "").trim();
+  if (!discipline || discipline.toLowerCase() === "physiotherapy") return "Physiotherapist";
+  return discipline;
 }
 
 function createCaseManager(db, body, actorId) {
@@ -1308,7 +1364,7 @@ function buildBootstrap(db, userId) {
     )
     .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 
-  const currentUserPublic = publicUser(currentUser);
+  const currentUserPublic = publicUser(currentUser, { includeSignature: true });
   if (!canUseOwnerWorkspace) currentUserPublic.isOwner = false;
 
   return {
@@ -2539,7 +2595,9 @@ function renderReportHtml(db, report, options = {}) {
     .photo-grid img { display: block; max-width: 100%; }
     .photo-grid figcaption { color: #5b6a66; font-size: 13px; margin-top: 8px; }
     .report-closing { font-weight: 700; margin: 32px 0 0; }
-    .signature { margin-top: 40px; }
+    .signature { display: grid; gap: 3px; margin-top: 10px; }
+    .signature img { display: block; height: auto; max-height: 70px; max-width: 210px; object-fit: contain; }
+    .signature p { margin: 0; }
     @media print { main { padding: 0; } button { display: none; } }
   </style>
 </head>
@@ -2576,8 +2634,13 @@ function renderReportHtml(db, report, options = {}) {
       </div>
     ` : ""}
     <p class="report-closing">${escapeHtml(REPORT_CLOSING_MESSAGE)}</p>
-    <p class="signature">Therapist Signature: ${escapeHtml(report.signature || contractor.name || "")}</p>
-    ${report.signedAt ? `<p>Signed: ${escapeHtml(new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Brisbane" }).format(new Date(report.signedAt)))}</p>` : ""}
+    <div class="signature">
+      <p>Warm regards,</p>
+      ${contractor.signatureDataUrl ? `<img src="${escapeHtml(contractor.signatureDataUrl)}" alt="Therapist signature">` : ""}
+      <strong>${escapeHtml(report.signature || contractor.name || "")}</strong>
+      <span>${escapeHtml(professionalTitleForUser(contractor))}</span>
+      ${report.signedAt ? `<span>Signed: ${escapeHtml(new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Brisbane" }).format(new Date(report.signedAt)))}</span>` : ""}
+    </div>
   </main>
 </body>
 </html>`;
@@ -2617,6 +2680,7 @@ function designedReportContext(db, report, options = {}) {
     caseManager,
     fields,
     photos: pdfImageAttachments(reportPhotoAttachmentsFromFields(fields)),
+    signatureImage: pdfSignatureImageFromUser(contractor),
     isEquipment,
     reportType,
     appointmentDate,
@@ -2768,7 +2832,7 @@ function designedParticipantDetailsSection(context) {
 function normalizeDesignedSectionsForPages(sections) {
   const normalized = [];
   for (const section of sections) {
-    if (section.rows || section.table) {
+    if (section.rows || section.table || section.signatureBlock) {
       normalized.push(section);
       continue;
     }
@@ -2789,10 +2853,12 @@ function designedSignatureSection(context) {
   return {
     title: "Therapist Signature",
     intro: REPORT_CLOSING_MESSAGE,
-    rows: [
-      ["Name", context.report.signature || context.contractor.name],
-      ["Signed", context.report.signedAt ? formatReportDateTime(context.report.signedAt) : ""]
-    ]
+    signatureBlock: {
+      image: context.signatureImage,
+      name: context.report.signature || context.contractor.name,
+      discipline: professionalTitleForUser(context.contractor),
+      signed: context.report.signedAt ? formatReportDateTime(context.report.signedAt) : ""
+    }
   };
 }
 
@@ -2946,6 +3012,13 @@ function selectedEquipmentRecommendationText(fields) {
 }
 
 function estimateDesignedSectionHeight(section) {
+  if (section.signatureBlock) {
+    const introLines = section.intro ? wrapDesignedText(section.intro, 88) : [];
+    const image = section.signatureBlock.image;
+    const imageHeight = image ? fitImage(image.width, image.height, 180, 52).height + 8 : 0;
+    const signedHeight = section.signatureBlock.signed ? 12 : 0;
+    return 84 + introLines.length * 14 + imageHeight + signedHeight;
+  }
   if (section.rows) {
     const introLines = section.intro ? wrapDesignedText(section.intro, 88) : [];
     const introHeight = introLines.length ? introLines.length * 14 + 12 : 0;
@@ -2964,6 +3037,35 @@ function drawDesignedSection(page, section, startY) {
   page.content.push(drawRect(geometry.x, y - 24, geometry.width, 24, "e9f8fb"));
   page.content.push(drawText(section.title, geometry.x + 10, y - 8, 12, "F2", "087f9a"));
   y -= 38;
+
+  if (section.signatureBlock) {
+    const introLines = section.intro ? wrapDesignedText(section.intro, 88) : [];
+    for (const line of introLines) {
+      page.content.push(drawText(line, geometry.x + 14, y, 10, "F2", "26211f"));
+      y -= 14;
+    }
+    y -= 8;
+    page.content.push(drawText("Warm regards,", geometry.x + 14, y, 10, "F1", "26211f"));
+    y -= 16;
+
+    if (section.signatureBlock.image) {
+      const image = section.signatureBlock.image;
+      const placement = fitImage(image.width, image.height, 180, 52);
+      page.images.push({ pdfName: image.pdfName, buffer: image.buffer, width: image.width, height: image.height });
+      page.content.push(drawImage(image.pdfName, geometry.x + 14, y - placement.height + 4, placement.width, placement.height));
+      y -= placement.height + 6;
+    }
+
+    page.content.push(drawText(section.signatureBlock.name || "", geometry.x + 14, y, 10, "F2", "26211f"));
+    y -= 14;
+    page.content.push(drawText(section.signatureBlock.discipline || "Physiotherapist", geometry.x + 14, y, 10, "F1", "26211f"));
+    y -= 14;
+    if (section.signatureBlock.signed) {
+      page.content.push(drawText(`Signed: ${section.signatureBlock.signed}`, geometry.x + 14, y, 8.5, "F1", "58524c"));
+      y -= 12;
+    }
+    return y - 12;
+  }
 
   if (section.rows) {
     if (section.intro) {
@@ -3460,7 +3562,9 @@ function reportTextLines(db, report) {
 
   lines.push(...wrapPdfText(REPORT_CLOSING_MESSAGE, 92));
   lines.push("");
-  lines.push(`Therapist Signature: ${report.signature || contractor.name || ""}`);
+  lines.push("Warm regards,");
+  lines.push(report.signature || contractor.name || "");
+  lines.push(professionalTitleForUser(contractor));
   if (report.signedAt) lines.push(`Signed: ${report.signedAt}`);
   return lines;
 }
@@ -3585,6 +3689,21 @@ function pdfImageAttachments(photoAttachments = []) {
       };
     })
     .filter(Boolean);
+}
+
+function pdfSignatureImageFromUser(user = {}) {
+  const dataUrl = sanitizeSignatureDataUrl(user.signatureDataUrl);
+  if (!dataUrl) return null;
+  const match = dataUrl.match(/^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) return null;
+  const buffer = Buffer.from(match[1], "base64");
+  if (!buffer.length) return null;
+  return {
+    pdfName: "TherapistSignature",
+    width: Math.max(1, Math.min(1200, Number(user.signatureWidth || 520) || 520)),
+    height: Math.max(1, Math.min(500, Number(user.signatureHeight || 160) || 160)),
+    buffer
+  };
 }
 
 function pdfImagePlacement(width, height) {

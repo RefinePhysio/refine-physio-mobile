@@ -128,7 +128,7 @@ export function cookieValue(cookieHeader, name) {
   return "";
 }
 
-export function publicUser(user) {
+export function publicUser(user, options = {}) {
   if (!user) return null;
   return {
     id: user.id,
@@ -145,6 +145,9 @@ export function publicUser(user) {
     isOwner: Boolean(user.isOwner),
     requiresLoginSetup: Boolean(user.requiresLoginSetup),
     hasPassword: hasPassword(user),
+    hasSignature: Boolean(user.signatureDataUrl),
+    signatureDataUrl: options.includeSignature ? user.signatureDataUrl || "" : "",
+    signatureUpdatedAt: user.signatureUpdatedAt || "",
     isActive: user.isActive !== false,
     lastLoginAt: user.lastLoginAt || ""
   };
