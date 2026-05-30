@@ -1282,9 +1282,30 @@ label {
 }
 
 .overview-action-row {
+  align-items: start;
   display: grid;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.overview-action-row > .section {
+  min-width: 0;
+}
+
+.overview-action-row > .section > .section-heading {
+  align-items: center;
+  display: flex;
+  min-height: 34px;
+}
+
+.overview-action-row > .section > .section-heading h3 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+.overview-action-row > .section > .section-heading span {
+  line-height: 1.2;
+  margin-left: auto;
 }
 
 .overview-action-row .overview-compact-grid {
@@ -1315,20 +1336,26 @@ label {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.overview-review-list .inbox-card {
-  gap: 7px;
-  overflow: visible;
+.overview-report-row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--coral);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
   padding: 8px;
 }
 
-.overview-review-list .inbox-card > .meta-row,
-.overview-review-list .inbox-card > .detail-list,
-.overview-review-list .inbox-card > .mini-actions {
-  display: none;
+.overview-report-actions {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.overview-review-list .inbox-card .section-heading {
-  align-items: start;
+.overview-report-actions button,
+.overview-report-actions a.button {
+  min-height: 34px;
+  padding: 7px 10px;
 }
 
 .overview-compact-grid > .empty-state {

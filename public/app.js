@@ -694,7 +694,7 @@ function renderAdminOverview() {
       <section class="section overview-panel">
         <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
         <div class="overview-scroll-grid overview-review-list">
-          ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
+          ${reportReviewItems.map(renderOverviewReportReviewItem).join("") || emptyState("No signed reports are waiting for admin review.")}
         </div>
       </section>
     </div>
@@ -3749,6 +3749,20 @@ function renderInboxItemCard(item) {
             data-status="${status}"
           >${escapeHtml(inboxStatusLabel(status))}</button>
         `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderOverviewReportReviewItem(item) {
+  const reportId = item.sourceId || "";
+  const report = reportId ? state.data.reports.find((entry) => entry.id === reportId) : null;
+  return `
+    <article class="overview-report-row">
+      ${renderReportReviewDropdown(item, report)}
+      <div class="overview-report-actions">
+        <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
+        <a class="button secondary" href="/api/reports/${escapeHtml(reportId)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
       </div>
     </article>
   `;
