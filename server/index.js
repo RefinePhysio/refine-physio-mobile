@@ -656,6 +656,8 @@ async function routeApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/treatment-notes") {
     const body = await readJsonBody(req);
     body.actorId = auth.user.id;
+    const existingNote = body.id ? db.treatmentNotes.find((item) => item.id === body.id) : null;
+    if (existingNote && !canAccessTreatmentNote(db, auth.user, existingNote)) return sendJson(res, 403, { error: "You do not have access to this note." });
     const appointment = body.appointmentId ? db.appointments.find((item) => item.id === body.appointmentId) : null;
     if (appointment && !canAccessAppointment(db, auth.user, appointment)) return sendJson(res, 403, { error: "You do not have access to this appointment." });
     if (auth.user.role === "contractor") body.contractorId = auth.user.id;
@@ -668,6 +670,8 @@ async function routeApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/reports") {
     const body = await readJsonBody(req);
     body.actorId = auth.user.id;
+    const existingReport = body.id ? db.reports.find((item) => item.id === body.id) : null;
+    if (existingReport && !canAccessReport(auth.user, existingReport)) return sendJson(res, 403, { error: "You do not have access to this report." });
     const appointment = body.appointmentId ? db.appointments.find((item) => item.id === body.appointmentId) : null;
     if (appointment && !canAccessAppointment(db, auth.user, appointment)) return sendJson(res, 403, { error: "You do not have access to this appointment." });
     if (auth.user.role === "contractor") body.contractorId = auth.user.id;
@@ -746,6 +750,9 @@ async function routeApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/approval-requests") {
     const body = await readJsonBody(req);
     if (auth.user.role === "contractor") body.contractorId = auth.user.id;
+    if (auth.user.role === "contractor" && !contractorCanAccessClient(db, auth.user.id, body.clientId)) {
+      return sendJson(res, 403, { error: "Practitioners can only request approvals for their own clients." });
+    }
     const client = db.clients.find((item) => item.id === body.clientId);
     const requestType = body.type || "Approvals needed";
     const approvalNeedType = body.approvalNeedType || requestType;
@@ -843,6 +850,9 @@ async function routeApi(req, res, url) {
   if (method === "POST" && url.pathname === "/api/rebook-statuses") {
     const body = await readJsonBody(req);
     if (auth.user.role === "contractor") body.contractorId = auth.user.id;
+    if (auth.user.role === "contractor" && !contractorCanAccessClient(db, auth.user.id, body.clientId)) {
+      return sendJson(res, 403, { error: "Practitioners can only update rebooking status for their own clients." });
+    }
     const client = db.clients.find((item) => item.id === body.clientId);
     const contractor = db.users.find((item) => item.id === body.contractorId);
     if (!client) return sendJson(res, 404, { error: "Client not found" });
@@ -975,6 +985,14 @@ function requireRole(res, user, roles) {
 function canAccessAppointment(db, user, appointment) {
   if (["admin", "receptionist"].includes(user.role)) return true;
   return user.role === "contractor" && appointment.contractorId === user.id;
+}
+
+function canAccessTreatmentNote(db, user, note) {
+  if (["admin", "receptionist"].includes(user.role)) return true;
+  if (user.role !== "contractor") return false;
+  if (note.contractorId === user.id) return true;
+  const appointment = db.appointments.find((item) => item.id === note.appointmentId);
+  return Boolean(appointment && appointment.contractorId === user.id);
 }
 
 function canAccessReport(user, report) {
