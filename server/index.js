@@ -1276,6 +1276,7 @@ function buildBootstrap(db, userId) {
     ? db.treatmentNotes.filter((note) => physioContractorIds.has(note.contractorId) || note.discipline === "Physiotherapy")
     : db.treatmentNotes.filter((note) => note.contractorId === currentUser.id);
   const reports = isOperations ? physioReports : db.reports.filter((report) => report.contractorId === currentUser.id);
+  const scrubCaseManagerDetails = !isOperations;
   const treatmentNotesForRole = scrubCaseManagerDetails
     ? treatmentNotes.map(stripCaseManagerFromTreatmentNote)
     : treatmentNotes;
@@ -1304,8 +1305,6 @@ function buildBootstrap(db, userId) {
       : message.fromUserId === currentUser.id || message.toUserId === currentUser.id
     )
     .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-
-  const scrubCaseManagerDetails = !isOperations;
 
   const currentUserPublic = publicUser(currentUser);
   if (!canUseOwnerWorkspace) currentUserPublic.isOwner = false;
