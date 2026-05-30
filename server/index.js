@@ -107,6 +107,7 @@ const reportTemplates = [
 
 const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
 const SIGNATURE_MAX_DATA_URL_LENGTH = 450000;
+const AI_REPORT_SECTION_MAX_CHARS = 5000;
 
 const appointmentStatuses = ["booked", "confirmed", "completed", "cancelled", "rescheduled", "no-show"];
 const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "paused", "discharged", "declined"];
@@ -475,6 +476,16 @@ async function routeApi(req, res, url) {
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     sendJson(res, 200, buildBootstrap(db, auth.user.id));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/ai/report-section") {
+    const body = await readJsonBody(req);
+    const result = await polishReportSectionWithOpenAI(body);
+    if (result.error) return sendJson(res, result.status, { error: result.error });
+    logActivity(db, auth.user.id, "ai_polished_report_section", "reportSection", result.sectionType);
+    await writeDb(db);
+    sendJson(res, 200, { text: result.text });
     return;
   }
 
@@ -1136,6 +1147,146 @@ function sanitizeSignatureDataUrl(value) {
   if (!dataUrl) return "";
   if (dataUrl.length > SIGNATURE_MAX_DATA_URL_LENGTH) return "";
   return /^data:image\/jpe?g;base64,[A-Za-z0-9+/=]+$/i.test(dataUrl) ? dataUrl : "";
+}
+
+async function polishReportSectionWithOpenAI(body = {}) {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    return { status: 409, error: "AI rewriting is not connected yet. Add OPENAI_API_KEY in Render environment variables first." };
+  }
+
+  const section = aiReportSectionConfig(body.sectionType);
+  if (!section) {
+    return { status: 400, error: "This report section is not set up for AI rewriting." };
+  }
+
+  const text = String(body.text || "").trim();
+  if (!text) return { status: 400, error: "Add dot points first." };
+  if (text.length > AI_REPORT_SECTION_MAX_CHARS) {
+    return { status: 400, error: "This section is too long for one AI rewrite. Please shorten it first." };
+  }
+
+  const model = String(process.env.OPENAI_MODEL || "gpt-5-mini").trim();
+  const requestBody = {
+    model,
+    instructions: aiReportInstructions(section, body.reportType),
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `Raw practitioner notes:\n${text}`
+          }
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "report_section_rewrite",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            text: {
+              type: "string",
+              description: "The polished report-ready paragraph text."
+            }
+          },
+          required: ["text"]
+        }
+      }
+    },
+    max_output_tokens: 800,
+    store: false
+  };
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error?.message || "OpenAI request failed.";
+      return { status: 502, error: `AI rewrite failed: ${message}` };
+    }
+
+    const outputText = extractOpenAIOutputText(payload);
+    const polished = parseAiRewriteText(outputText);
+    if (!polished) return { status: 502, error: "AI rewrite did not return usable text." };
+
+    return {
+      sectionType: section.type,
+      text: polished.slice(0, AI_REPORT_SECTION_MAX_CHARS)
+    };
+  } catch (error) {
+    return { status: 502, error: `AI rewrite failed: ${error.message}` };
+  }
+}
+
+function aiReportSectionConfig(sectionType) {
+  return {
+    subjective: {
+      type: "subjective",
+      label: "Subjective",
+      guidance: "Focus on patient-reported and carer-reported information, symptoms, function, goals, concerns, and relevant history."
+    },
+    objective: {
+      type: "objective",
+      label: "Objective observations",
+      guidance: "Focus on observed assessment findings, mobility, transfers, balance, gait, strength, safety, and outcome measure observations."
+    },
+    equipmentChosenReason: {
+      type: "equipmentChosenReason",
+      label: "Equipment trial chosen option explanation",
+      guidance: "Explain why the chosen equipment option was most suitable based only on the supplied trial notes. Do not invent brands, pricing, supplier details, risks, or specifications."
+    }
+  }[String(sectionType || "").trim()];
+}
+
+function aiReportInstructions(section, reportType = "") {
+  return [
+    "You are helping an Australian mobile physiotherapy practitioner rewrite rough report notes into clear professional report wording.",
+    `Section: ${section.label}.`,
+    reportType ? `Report type: ${String(reportType).trim()}.` : "",
+    section.guidance,
+    "Rewrite only the information supplied by the practitioner.",
+    "Do not add, infer, assume, embellish, diagnose, recommend, or create any clinical facts that are not in the notes.",
+    "Preserve clinical meaning, uncertainty, names, abbreviations, measurements, timeframes, and equipment details exactly where important.",
+    "Use Australian English and a warm, professional clinical report tone.",
+    "If the notes are dot points, turn them into one or two polished paragraphs. If the notes are already paragraphs, lightly improve grammar and flow.",
+    "Return JSON only with a single key named text."
+  ].filter(Boolean).join("\n");
+}
+
+function extractOpenAIOutputText(payload = {}) {
+  if (typeof payload.output_text === "string") return payload.output_text;
+  const pieces = [];
+  for (const item of payload.output || []) {
+    for (const content of item.content || []) {
+      if (typeof content.text === "string") pieces.push(content.text);
+    }
+  }
+  return pieces.join("\n").trim();
+}
+
+function parseAiRewriteText(outputText) {
+  const raw = String(outputText || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    return String(parsed.text || "").trim();
+  } catch {
+    return raw;
+  }
 }
 
 function normalizedRole(role) {

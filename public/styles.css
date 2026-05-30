@@ -2692,6 +2692,30 @@ label {
   margin: 0;
 }
 
+.ai-textarea-field {
+  gap: 7px;
+}
+
+.ai-field-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.ai-polish-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.ai-polish-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .photo-upload-control {
   align-items: center;
   background: var(--surface);
@@ -4596,6 +4620,16 @@ tr:last-child td {
   .report-mobile-form textarea {
     line-height: 1.45;
     min-height: 118px;
+  }
+
+  .ai-field-header {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .ai-polish-button {
+    justify-self: start;
+    min-height: 40px;
   }
 
   .note-form .note-field textarea {

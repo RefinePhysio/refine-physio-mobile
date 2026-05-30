@@ -2412,13 +2412,13 @@ function renderInitialPhysioReportFields(appointment, fields = {}) {
     ${textarea("field_reasonForReferral", "Reason for referral", "full", fields.reasonForReferral || (appointment ? appointmentReasonForReferral(appointment) : ""))}
     ${textarea("field_medicalHistory", "Medical history", "full", fields.medicalHistory || client.diagnosis || "")}
     ${textarea("field_currentHomeSetUp", "Current home set up", "full", fields.currentHomeSetUp || "")}
-    ${textarea("field_subjective", "Subjective", "full", fields.subjective || "")}
+    ${aiTextarea("field_subjective", "Subjective", "full", fields.subjective || "", "subjective")}
     <section class="clinical-block full">
       <div class="section-heading">
         <h4>Objective</h4>
         ${statusPill(`${selectedMeasures.length} selected`, selectedMeasures.length ? "blue" : "gold")}
       </div>
-      ${textarea("field_objectiveObservations", "Objective observations", "full", fields.objectiveObservations || "")}
+      ${aiTextarea("field_objectiveObservations", "Objective observations", "full", fields.objectiveObservations || "", "objective")}
       ${renderOutcomeMeasurePicker(selectedMeasures)}
       <div id="custom-outcome-wrap" class="${selectedMeasures.includes("other") ? "full" : "full hidden"}">
         ${textarea("field_customOutcomeMeasures", "Other outcome measures", "full", fields.customOutcomeMeasures || "")}
@@ -2525,7 +2525,7 @@ function renderEquipmentTrialBlock(trialIndex, fields = {}) {
         <button type="button" class="secondary" data-action="add-equipment-option" data-trial-index="${trialIndex}">Add equipment option</button>
       </div>
       ${input(`field_equipmentTrial_${trialIndex}_chosenModel`, "Chosen equipment model", "text", false, "full", fields[`equipmentTrial_${trialIndex}_chosenModel`] || "")}
-      ${textarea(`field_equipmentTrial_${trialIndex}_chosenReason`, "Why this model was chosen", "full", fields[`equipmentTrial_${trialIndex}_chosenReason`] || "")}
+      ${aiTextarea(`field_equipmentTrial_${trialIndex}_chosenReason`, "Why this model was chosen", "full", fields[`equipmentTrial_${trialIndex}_chosenReason`] || "", "equipmentChosenReason")}
     </section>
   `;
 }
@@ -4976,6 +4976,12 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='ai-polish-section']").forEach((button) => {
+    button.addEventListener("click", () => {
+      void polishReportSectionWithAi(button);
+    });
+  });
+
   bindSignaturePad();
   document.querySelector("[data-action='signature-save']")?.addEventListener("click", () => {
     void saveSignatureFromPad();
@@ -5628,6 +5634,44 @@ function normalizeUserFormPayload(payload) {
     ...payload,
     isActive: payload.isActive !== "false"
   };
+}
+
+async function polishReportSectionWithAi(button) {
+  const textareaEl = document.getElementById(button.dataset.target || "");
+  if (!(textareaEl instanceof HTMLTextAreaElement)) return;
+
+  const rawText = textareaEl.value.trim();
+  if (!rawText) {
+    toast("Add dot points first");
+    textareaEl.focus();
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "AI writing...";
+
+  try {
+    const form = textareaEl.closest("#report-form");
+    const result = await fetchJson("/api/ai/report-section", {
+      method: "POST",
+      body: {
+        text: rawText,
+        sectionType: button.dataset.sectionType || textareaEl.dataset.aiSection || "",
+        reportType: form?.querySelector("select[name='type']")?.value || state.reportType || ""
+      }
+    });
+    textareaEl.value = result.text || rawText;
+    textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+    preserveReportDraft();
+    toast("AI paragraph added");
+  } catch (error) {
+    toast(error.message || "AI rewrite failed");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText || "AI paragraph";
+    textareaEl.focus();
+  }
 }
 
 async function fetchJson(url, options = {}) {
@@ -8134,6 +8178,17 @@ function textarea(name, label, className = "", value = "") {
   return `<label class="${className}">
     ${escapeHtml(label)}
     <textarea name="${name}">${escapeHtml(value)}</textarea>
+  </label>`;
+}
+
+function aiTextarea(name, label, className = "", value = "", sectionType = "") {
+  const id = `ai-${String(name).replace(/[^a-z0-9_-]/gi, "-")}`;
+  return `<label class="${className} ai-textarea-field" for="${id}">
+    <span class="ai-field-header">
+      <span>${escapeHtml(label)}</span>
+      <button type="button" class="secondary ai-polish-button" data-action="ai-polish-section" data-target="${escapeHtml(id)}" data-section-type="${escapeHtml(sectionType)}">AI paragraph</button>
+    </span>
+    <textarea id="${id}" name="${name}" data-ai-section="${escapeHtml(sectionType)}">${escapeHtml(value)}</textarea>
   </label>`;
 }
 
