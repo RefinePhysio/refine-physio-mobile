@@ -75,7 +75,6 @@ const adminTabs = [
   ["messages", "Messages"],
   ["users", "Users"],
   ["caseManagers", "Case managers"],
-  ["companies", "Companies"],
   ["adminReports", "Reports"],
   ["referrals", "Referrals"],
   ["archived", "Archived"],
@@ -655,7 +654,6 @@ function renderView() {
     if (state.tab === "messages") return renderAdminMessages();
     if (state.tab === "users" && role === "admin") return renderUserManagement();
     if (state.tab === "caseManagers" && role === "admin") return renderCaseManagers();
-    if (state.tab === "companies" && role === "admin") return renderReferralCompanies();
     if (state.tab === "adminReports") return renderAdminReports();
     if (state.tab === "referrals") return renderAdminReferrals();
     if (state.tab === "archived") return renderAdminArchivedAppointments();
@@ -2339,7 +2337,9 @@ function renderReports() {
         ${select("clientId", "Client", data.clients.map((client) => [client.id, client.name]), selectedClientId)}
         ${select("contractorId", "Therapist", data.contractors.map((contractor) => [contractor.id, contractor.name]), selectedContractorId)}
         ${selectedAppointment ? `<div class="pill blue full">Linked to ${escapeHtml(formatAppointmentLabel(selectedAppointment.id))}</div>` : ""}
-        ${textarea("summary", "Summary", "full", reportSummary)}
+        ${isEquipmentTrialReport(state.reportType)
+          ? aiTextarea("summary", "Summary", "full", reportSummary, "equipmentSummary")
+          : textarea("summary", "Summary", "full", reportSummary)}
         ${isInitialPhysioReport(state.reportType)
           ? renderInitialPhysioReportFields(selectedAppointment, reportFieldsValue)
           : isEquipmentTrialReport(state.reportType)

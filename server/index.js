@@ -1258,6 +1258,11 @@ function aiReportSectionConfig(sectionType) {
       type: "equipmentRecommendations",
       label: "Equipment trial recommendations",
       guidance: "Rewrite the supplied equipment recommendation dot points into clear report-ready wording. Do not invent equipment, brands, funding advice, supplier details, prices, risks, or follow-up actions that were not supplied."
+    },
+    equipmentSummary: {
+      type: "equipmentSummary",
+      label: "Equipment trial summary",
+      guidance: "Rewrite the supplied equipment trial summary dot points into a concise report-ready summary. Do not invent trial outcomes, equipment details, recommendations, funding details, or safety issues that were not supplied."
     }
   }[String(sectionType || "").trim()];
 }
