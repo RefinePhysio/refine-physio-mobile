@@ -3726,16 +3726,19 @@ function renderAppointmentAlert(appointment) {
 function renderInboxItemCard(item) {
   const isClosed = ["resolved", "closed"].includes(item.status);
   const reportId = item.sourceType === "report_copy" ? item.sourceId : "";
+  const report = reportId ? state.data.reports.find((entry) => entry.id === reportId) : null;
+  const titleMarkup = reportId
+    ? renderReportReviewDropdown(item, report)
+    : `<h4>${escapeHtml(item.title)}</h4>`;
   const reportActions = reportId ? `
     <div class="actions">
-      <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
       <a class="button secondary" href="/api/reports/${escapeHtml(reportId)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
     </div>
   ` : "";
   return `
     <article class="card compact inbox-card ${item.sourceType === "report_copy" ? "is-report-copy" : ""} ${isClosed ? "muted-card" : ""}">
       <div class="section-heading">
-        <h4>${escapeHtml(item.title)}</h4>
+        ${titleMarkup}
         ${statusPill(inboxStatusLabel(item.status), inboxTone(item.status))}
       </div>
       <div class="meta-row">
@@ -3760,6 +3763,27 @@ function renderInboxItemCard(item) {
         `).join("")}
       </div>
     </article>
+  `;
+}
+
+function renderReportReviewDropdown(item, report) {
+  const reportId = report?.id || item.sourceId || "";
+  const sentAt = report?.adminCopySentAt || report?.signedAt || report?.updatedAt || item.createdAt || report?.createdAt;
+  const appointment = report?.appointmentId ? appointmentById(report.appointmentId) : null;
+  return `
+    <details class="report-review-dropdown">
+      <summary>
+        <span>${escapeHtml(item.title)}</span>
+        <small>Details</small>
+      </summary>
+      <div class="report-review-dropdown-body">
+        <div><strong>Written by</strong><span>${escapeHtml(userName(report?.contractorId || item.contractorId))}</span></div>
+        <div><strong>Client</strong><span>${escapeHtml(clientName(report?.clientId || item.clientId))}</span></div>
+        <div><strong>Sent to admin</strong><span>${formatDateTime(sentAt)}</span></div>
+        ${appointment ? `<div><strong>Appointment</strong><span>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</span></div>` : ""}
+        <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
+      </div>
+    </details>
   `;
 }
 
