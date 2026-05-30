@@ -2432,7 +2432,7 @@ function renderInitialPhysioReportFields(appointment, fields = {}) {
     </section>
     ${textarea("field_assessment", "Assessment", "full", fields.assessment || "")}
     ${textarea("field_treatment", "Treatment", "full", fields.treatment || "")}
-    ${textarea("field_recommendations", "Recommendations", "full", fields.recommendations || "")}
+    ${aiTextarea("field_recommendations", "Recommendations", "full", fields.recommendations || "", "recommendations")}
     ${renderReportPhotoAttachments(fields)}
     ${textarea("field_plan", "Plan", "full", fields.plan || "")}
   `;
@@ -2540,7 +2540,7 @@ function renderEquipmentRecommendations(fields = {}) {
       <div id="equipment-recommendation-list">
         ${renderChosenModelRecommendations(fields)}
       </div>
-      ${textarea("field_equipmentAdditionalRecommendations", "Additional recommendations", "full", fields.equipmentAdditionalRecommendations || "")}
+      ${aiTextarea("field_equipmentAdditionalRecommendations", "Additional recommendations", "full", fields.equipmentAdditionalRecommendations || "", "equipmentRecommendations")}
       ${textarea("field_equipmentPlan", "Plan", "full", fields.equipmentPlan || "")}
     </section>
   `;

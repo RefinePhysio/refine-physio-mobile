@@ -1248,6 +1248,16 @@ function aiReportSectionConfig(sectionType) {
       type: "equipmentChosenReason",
       label: "Equipment trial chosen option explanation",
       guidance: "Explain why the chosen equipment option was most suitable based only on the supplied trial notes. Do not invent brands, pricing, supplier details, risks, or specifications."
+    },
+    recommendations: {
+      type: "recommendations",
+      label: "Recommendations",
+      guidance: "Rewrite the supplied recommendation dot points into clear report-ready recommendations. Do not create new recommendations, treatment frequency, risks, equipment, or follow-up actions that were not supplied."
+    },
+    equipmentRecommendations: {
+      type: "equipmentRecommendations",
+      label: "Equipment trial recommendations",
+      guidance: "Rewrite the supplied equipment recommendation dot points into clear report-ready wording. Do not invent equipment, brands, funding advice, supplier details, prices, risks, or follow-up actions that were not supplied."
     }
   }[String(sectionType || "").trim()];
 }
