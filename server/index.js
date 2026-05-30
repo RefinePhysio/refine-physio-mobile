@@ -37,14 +37,16 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
-const dataDir = path.join(__dirname, "data");
-const dbPath = path.join(dataDir, "db.json");
-const seedPath = path.join(dataDir, "seed.json");
 const publicDir = path.join(projectRoot, "public");
 const reportTemplateAssetDir = path.join(__dirname, "assets", "report-templates");
 
 loadEnv(path.join(projectRoot, ".env"));
 
+const dataDir = process.env.REFINE_DATA_DIR
+  ? path.resolve(process.env.REFINE_DATA_DIR)
+  : path.join(__dirname, "data");
+const dbPath = path.join(dataDir, "db.json");
+const seedPath = path.join(__dirname, "data", "seed.json");
 const port = Number(process.env.PORT || 4173);
 assertSafeProductionConfig();
 
@@ -155,7 +157,7 @@ function assertSafeProductionConfig() {
   if (process.env.NODE_ENV !== "production") return;
 
   const missing = [];
-  if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
+  if (!process.env.DATABASE_URL && !process.env.REFINE_DATA_DIR) missing.push("DATABASE_URL or REFINE_DATA_DIR");
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) missing.push("SESSION_SECRET");
   if (process.env.REFINE_EMPTY_DB !== "true") missing.push("REFINE_EMPTY_DB=true");
   if (process.env.REFINE_AUTH_IMPLEMENTED !== "true") missing.push("REFINE_AUTH_IMPLEMENTED=true after real login is implemented");

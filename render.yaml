@@ -1,0 +1,65 @@
+services:
+  - type: web
+    name: refine-physio-mobile
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm run seed:admin && npm start
+    autoDeploy: true
+    disk:
+      name: refine-data
+      mountPath: /var/data/refine
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REFINE_EMPTY_DB
+        value: "true"
+      - key: REFINE_AUTH_IMPLEMENTED
+        value: "true"
+      - key: REFINE_DATA_DIR
+        value: /var/data/refine
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        value: katie@refinehealthgroup.com.au
+      - key: ADMIN_NAME
+        value: Katie Admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CLINIKO_API_KEY
+        sync: false
+      - key: CLINIKO_BASE_URL
+        value: https://api.au1.cliniko.com/v1
+      - key: CLINIKO_USER_AGENT
+        value: Refine Physio Mobile (admin@refinephysio.com.au)
+      - key: CLINIKO_POLL_ENABLED
+        value: "false"
+      - key: CLINIKO_APPOINTMENT_CREATE_ENABLED
+        value: "false"
+      - key: CLINIKO_APPOINTMENT_WRITE_ENABLED
+        value: "false"
+      - key: CLINIKO_PATIENT_CREATE_ENABLED
+        value: "false"
+      - key: CLINIKO_REPORT_UPLOAD_ENABLED
+        value: "false"
+      - key: CLINIKO_REPORT_UPLOAD_AUTO_ENABLED
+        value: "false"
+      - key: CLINIKO_NOTE_UPLOAD_ENABLED
+        value: "false"
+      - key: CLINIKO_NOTE_UPLOAD_AUTO_ENABLED
+        value: "false"
+      - key: CLINIKO_POLL_MINUTES
+        value: "5"
+      - key: CLINIKO_MIN_REQUEST_INTERVAL_MS
+        value: "350"
+      - key: CLINIKO_MAX_SYNC_PAGES
+        value: "20"
+      - key: CLINIKO_APPOINTMENT_SYNC_PAST_DAYS
+        value: "14"
+      - key: CLINIKO_APPOINTMENT_SYNC_FUTURE_DAYS
+        value: "90"
+      - key: CLINIKO_ALLOW_MULTIPLE_LOCATIONS
+        value: "false"
+      - key: CLINIKO_ALLOW_MULTIPLE_PRACTITIONERS
+        value: "false"

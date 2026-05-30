@@ -8,15 +8,18 @@ import { hashPassword, normalizeEmail } from "../services/auth.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..", "..");
-const dataDir = path.join(projectRoot, "server", "data");
-const dbPath = path.join(dataDir, "db.json");
 
 loadEnv(path.join(projectRoot, ".env"));
 
+const dataDir = process.env.REFINE_DATA_DIR
+  ? path.resolve(process.env.REFINE_DATA_DIR)
+  : path.join(projectRoot, "server", "data");
+const dbPath = path.join(dataDir, "db.json");
 const args = parseArgs(process.argv.slice(2));
 const email = normalizeEmail(args.email || process.env.ADMIN_EMAIL || "admin@refinephysio.com.au");
 const name = String(args.name || process.env.ADMIN_NAME || "Refine Admin").trim();
-const password = String(args.password || process.env.ADMIN_PASSWORD || generatedPassword());
+const suppliedPassword = args.password || process.env.ADMIN_PASSWORD || "";
+const password = String(suppliedPassword || generatedPassword());
 
 if (!email) throw new Error("Admin email is required.");
 if (password.length < 10) throw new Error("Admin password must be at least 10 characters.");
@@ -58,7 +61,11 @@ if (!admin) {
   admin.updatedAt = new Date().toISOString();
 }
 
-admin.passwordHash = await hashPassword(password);
+const passwordWasGenerated = !suppliedPassword && !admin.passwordHash;
+const shouldSetPassword = Boolean(suppliedPassword) || !admin.passwordHash;
+if (shouldSetPassword) {
+  admin.passwordHash = await hashPassword(password);
+}
 for (const session of db.sessions) {
   if (session.userId === admin.id && !session.revokedAt) session.revokedAt = new Date().toISOString();
 }
@@ -74,9 +81,11 @@ db.activityLog.push({
 await writeFile(dbPath, `${JSON.stringify(db, null, 2)}\n`, "utf8");
 
 console.log(`Admin account ready: ${email}`);
-if (!args.password && !process.env.ADMIN_PASSWORD) {
+if (passwordWasGenerated) {
   console.log(`Generated temporary password: ${password}`);
   console.log("Store this password securely, then change it from Admin > Users.");
+} else if (!shouldSetPassword) {
+  console.log("Existing admin password left unchanged.");
 }
 
 function parseArgs(values) {
