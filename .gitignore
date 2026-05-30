@@ -1,0 +1,7 @@
+server/data/db.json
+server/data/*.tmp
+.env
+*.log
+node_modules/
+backups/
+analysis_pdf_assets/

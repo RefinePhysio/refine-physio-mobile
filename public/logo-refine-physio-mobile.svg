@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1449 389" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">Refine Physio Mobile</title>
+  <desc id="logo-desc">Refine Physio Mobile logo in white and blue on navy background.</desc>
+  <rect width="1449" height="389" fill="#11162c"/>
+  <g transform="translate(24 156)" fill="none" stroke="#08aeea" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="64" cy="64" r="58" stroke-width="7" opacity="0.88"/>
+    <path d="M106 30c-25-9-54-4-72 17-9 10-11 21-6 32 8 15 23 23 31 38 4 8 5 16 2 26" stroke-width="6"/>
+    <path d="M108 64c-19-3-42 0-57 12-12 10-16 24-10 38 5 10 15 18 28 26" stroke-width="5"/>
+    <path d="M30 36c18-18 46-29 80-27M48 22c21 10 34 24 41 41M29 72c13 2 27 9 43 20" stroke-width="4" opacity="0.72"/>
+    <circle cx="49" cy="48" r="4" fill="#08aeea" stroke="none"/>
+    <circle cx="38" cy="64" r="3.8" fill="#08aeea" stroke="none"/>
+    <circle cx="41" cy="82" r="3.8" fill="#08aeea" stroke="none"/>
+    <circle cx="53" cy="98" r="3.8" fill="#08aeea" stroke="none"/>
+    <circle cx="70" cy="111" r="3.6" fill="#08aeea" stroke="none"/>
+    <circle cx="88" cy="120" r="3.4" fill="#08aeea" stroke="none"/>
+  </g>
+  <text x="174" y="274" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="124" font-weight="540" letter-spacing="-3">Refine Physio</text>
+  <text x="1032" y="274" fill="#08aeea" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="124" font-weight="680" letter-spacing="-3">Mobile</text>
+</svg>

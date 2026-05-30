@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Refine Physio Mobile</title>
+  <desc id="desc">Refine Physio Mobile app icon.</desc>
+  <rect width="512" height="512" rx="112" fill="#11162c"/>
+  <path fill="#08aeea" d="M116 366V132h152c57 0 95 34 95 86 0 37-19 66-52 80l67 68h-82l-58-61h-48v61h-74Zm74-123h72c18 0 32-4 41-12 9-7 14-17 14-30 0-14-5-24-14-31-9-8-23-12-41-12h-72v85Z"/>
+  <path fill="#ffffff" d="M116 404h280v40H116z"/>
+</svg>

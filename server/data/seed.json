@@ -1,0 +1,317 @@
+{
+  "meta": {
+    "schemaVersion": 1,
+    "createdAt": "2026-05-26T00:00:00.000Z"
+  },
+  "settings": {
+    "businessName": "Refine Physio Mobile",
+    "timezone": "Australia/Brisbane"
+  },
+  "users": [
+    {
+      "id": "admin-jenni",
+      "name": "Jenni",
+      "email": "admin@refinephysio.com.au",
+      "role": "admin",
+      "discipline": "Admin",
+      "clinikoPractitionerId": null,
+      "phone": "0400 000 000"
+    },
+    {
+      "id": "physio-ella",
+      "name": "Ella Mason",
+      "email": "ella.contractor@example.com",
+      "role": "contractor",
+      "discipline": "Physiotherapy",
+      "clinikoPractitionerId": "201",
+      "phone": "0400 000 101",
+      "baseSuburb": "Carindale"
+    },
+    {
+      "id": "ot-noah",
+      "name": "Noah Patel",
+      "email": "noah.contractor@example.com",
+      "role": "contractor",
+      "discipline": "Occupational Therapy",
+      "clinikoPractitionerId": "202",
+      "phone": "0400 000 102",
+      "baseSuburb": "Chermside"
+    },
+    {
+      "id": "rmt-mia",
+      "name": "Mia Chen",
+      "email": "mia.contractor@example.com",
+      "role": "contractor",
+      "discipline": "Remedial Massage Therapy",
+      "clinikoPractitionerId": "203",
+      "phone": "0400 000 103",
+      "baseSuburb": "Springfield"
+    }
+  ],
+  "clients": [
+    {
+      "id": "client-ava",
+      "clinikoPatientId": "8801",
+      "name": "Ava Taylor",
+      "dob": "1944-08-17",
+      "address": "12 Jacaranda Street, Carindale QLD",
+      "suburb": "Carindale",
+      "phone": "0400 111 111",
+      "email": "ava.taylor@example.com",
+      "fundingType": "Home Care Package",
+      "emergencyContact": "Sam Taylor, 0400 222 222",
+      "risks": "Falls risk. Uses four-wheeled walker.",
+      "diagnosis": "Reduced mobility after recent hospital admission.",
+      "goals": "Improve confidence walking indoors and shower transfers."
+    },
+    {
+      "id": "client-ben",
+      "clinikoPatientId": "8802",
+      "name": "Ben Wilson",
+      "dob": "1952-02-05",
+      "address": "46 Banksia Avenue, Chermside QLD",
+      "suburb": "Chermside",
+      "phone": "0400 333 333",
+      "email": "ben.wilson@example.com",
+      "fundingType": "NDIS",
+      "emergencyContact": "Grace Wilson, 0400 444 444",
+      "risks": "Bathroom access concerns.",
+      "diagnosis": "Neurological condition impacting transfers.",
+      "goals": "Assess home safety and equipment needs."
+    },
+    {
+      "id": "client-claire",
+      "clinikoPatientId": "8803",
+      "name": "Claire Nguyen",
+      "dob": "1961-11-30",
+      "address": "8 Rivergum Circuit, Springfield QLD",
+      "suburb": "Springfield",
+      "phone": "0400 555 555",
+      "email": "claire.nguyen@example.com",
+      "fundingType": "Private",
+      "emergencyContact": "Linh Nguyen, 0400 666 666",
+      "risks": "Nil urgent alerts.",
+      "diagnosis": "Chronic neck and shoulder pain.",
+      "goals": "Reduce pain and improve tolerance for daily activity."
+    }
+  ],
+  "referrals": [
+    {
+      "id": "ref-001",
+      "clientId": "client-ava",
+      "clientName": "Ava Taylor",
+      "dob": "1944-08-17",
+      "address": "12 Jacaranda Street, Carindale QLD",
+      "phone": "0400 111 111",
+      "email": "ava.taylor@example.com",
+      "fundingType": "Home Care Package",
+      "referralSource": "Case manager",
+      "caseManager": "Renee Clark",
+      "diagnosis": "Reduced mobility after recent hospital admission.",
+      "goals": "Improve confidence walking indoors and shower transfers.",
+      "urgency": "High",
+      "notes": "Please prioritise initial mobile physio assessment.",
+      "risks": "Falls risk. Uses four-wheeled walker.",
+      "preferredTherapist": "Ella Mason",
+      "suburb": "Carindale",
+      "serviceTypeRequired": "Physiotherapy",
+      "status": "assigned",
+      "assignedContractorId": "physio-ella",
+      "createdAt": "2026-05-24T01:30:00.000Z",
+      "updatedAt": "2026-05-24T02:15:00.000Z"
+    },
+    {
+      "id": "ref-002",
+      "clientId": "client-ben",
+      "clientName": "Ben Wilson",
+      "dob": "1952-02-05",
+      "address": "46 Banksia Avenue, Chermside QLD",
+      "phone": "0400 333 333",
+      "email": "ben.wilson@example.com",
+      "fundingType": "NDIS",
+      "referralSource": "Support coordinator",
+      "caseManager": "Morgan Hill",
+      "diagnosis": "Neurological condition impacting transfers.",
+      "goals": "Assess home safety and equipment needs.",
+      "urgency": "Medium",
+      "notes": "Equipment trial likely required after OT assessment.",
+      "risks": "Bathroom access concerns.",
+      "preferredTherapist": "Noah Patel",
+      "suburb": "Chermside",
+      "serviceTypeRequired": "Occupational Therapy",
+      "status": "booked",
+      "assignedContractorId": "ot-noah",
+      "createdAt": "2026-05-22T23:00:00.000Z",
+      "updatedAt": "2026-05-25T00:20:00.000Z"
+    },
+    {
+      "id": "ref-003",
+      "clientId": "client-claire",
+      "clientName": "Claire Nguyen",
+      "dob": "1961-11-30",
+      "address": "8 Rivergum Circuit, Springfield QLD",
+      "phone": "0400 555 555",
+      "email": "claire.nguyen@example.com",
+      "fundingType": "Private",
+      "referralSource": "Self referral",
+      "caseManager": "",
+      "diagnosis": "Chronic neck and shoulder pain.",
+      "goals": "Reduce pain and improve tolerance for daily activity.",
+      "urgency": "Low",
+      "notes": "Prefers afternoon visits.",
+      "risks": "Nil urgent alerts.",
+      "preferredTherapist": "Mia Chen",
+      "suburb": "Springfield",
+      "serviceTypeRequired": "Remedial Massage Therapy",
+      "status": "active",
+      "assignedContractorId": "rmt-mia",
+      "createdAt": "2026-05-21T01:15:00.000Z",
+      "updatedAt": "2026-05-25T03:10:00.000Z"
+    }
+  ],
+  "appointments": [
+    {
+      "id": "appt-001",
+      "clinikoId": "cliniko-appt-1001",
+      "clientId": "client-ava",
+      "contractorId": "physio-ella",
+      "serviceType": "Physiotherapy",
+      "startsAt": "2026-05-26T00:00:00.000Z",
+      "endsAt": "2026-05-26T01:00:00.000Z",
+      "address": "12 Jacaranda Street, Carindale QLD",
+      "status": "confirmed",
+      "travelWindow": "20 min from previous",
+      "notesComplete": false,
+      "reportDue": true,
+      "recurrence": "Weekly x 6 pending approval"
+    },
+    {
+      "id": "appt-002",
+      "clinikoId": "cliniko-appt-1002",
+      "clientId": "client-ben",
+      "contractorId": "ot-noah",
+      "serviceType": "Occupational Therapy",
+      "startsAt": "2026-05-26T02:30:00.000Z",
+      "endsAt": "2026-05-26T04:00:00.000Z",
+      "address": "46 Banksia Avenue, Chermside QLD",
+      "status": "booked",
+      "travelWindow": "35 min from base",
+      "notesComplete": false,
+      "reportDue": true,
+      "recurrence": "Initial assessment"
+    },
+    {
+      "id": "appt-003",
+      "clinikoId": "cliniko-appt-1003",
+      "clientId": "client-claire",
+      "contractorId": "rmt-mia",
+      "serviceType": "Remedial Massage Therapy",
+      "startsAt": "2026-05-26T05:30:00.000Z",
+      "endsAt": "2026-05-26T06:30:00.000Z",
+      "address": "8 Rivergum Circuit, Springfield QLD",
+      "status": "confirmed",
+      "travelWindow": "15 min from previous",
+      "notesComplete": true,
+      "reportDue": false,
+      "recurrence": "Fortnightly"
+    },
+    {
+      "id": "appt-004",
+      "clinikoId": "cliniko-appt-1004",
+      "clientId": "client-ava",
+      "contractorId": "physio-ella",
+      "serviceType": "Physiotherapy",
+      "startsAt": "2026-05-27T00:30:00.000Z",
+      "endsAt": "2026-05-27T01:15:00.000Z",
+      "address": "12 Jacaranda Street, Carindale QLD",
+      "status": "booked",
+      "travelWindow": "18 min from base",
+      "notesComplete": false,
+      "reportDue": false,
+      "recurrence": "Treatment follow-up"
+    }
+  ],
+  "treatmentNotes": [
+    {
+      "id": "note-001",
+      "appointmentId": "appt-003",
+      "clientId": "client-claire",
+      "contractorId": "rmt-mia",
+      "discipline": "Remedial Massage Therapy",
+      "status": "signed",
+      "signature": "Mia Chen",
+      "fields": {
+        "areaTreated": "Neck and shoulders",
+        "clientPresentation": "Moderate upper trapezius tightness.",
+        "treatmentProvided": "Soft tissue release and gentle mobility advice.",
+        "pressureTolerance": "Moderate pressure tolerated well.",
+        "clientResponse": "Reported reduced stiffness after session.",
+        "painDiscomfortNotes": "No adverse response.",
+        "recommendations": "Hydration and gentle range of motion.",
+        "nextAppointmentPlan": "Review in two weeks."
+      },
+      "createdAt": "2026-05-25T06:45:00.000Z",
+      "updatedAt": "2026-05-25T06:50:00.000Z"
+    }
+  ],
+  "reports": [
+    {
+      "id": "report-001",
+      "type": "Initial Occupational Therapy Assessment Report",
+      "clientId": "client-ben",
+      "contractorId": "ot-noah",
+      "status": "draft",
+      "summary": "Initial OT assessment draft awaiting equipment recommendations.",
+      "fields": {
+        "summary": "Client requires review of bathroom access and transfer setup.",
+        "equipmentRecommendations": "Trial shower chair and rail placement options."
+      },
+      "createdAt": "2026-05-25T05:00:00.000Z",
+      "updatedAt": "2026-05-25T05:00:00.000Z"
+    }
+  ],
+  "approvalRequests": [
+    {
+      "id": "approval-001",
+      "contractorId": "physio-ella",
+      "clientId": "client-ava",
+      "type": "Ongoing appointments",
+      "status": "pending",
+      "details": "Request weekly physio for six weeks, then reassess.",
+      "createdAt": "2026-05-25T02:30:00.000Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-001",
+      "userId": "physio-ella",
+      "type": "new_referral_assigned",
+      "message": "Ava Taylor has been assigned for mobile physiotherapy.",
+      "read": false,
+      "createdAt": "2026-05-24T02:15:00.000Z"
+    },
+    {
+      "id": "notif-002",
+      "userId": "admin-jenni",
+      "type": "approval_request",
+      "message": "Ella Mason requested an ongoing schedule for Ava Taylor.",
+      "read": false,
+      "createdAt": "2026-05-25T02:30:00.000Z"
+    }
+  ],
+  "activityLog": [
+    {
+      "id": "log-001",
+      "actorId": "admin-jenni",
+      "action": "assigned_referral",
+      "entityType": "referral",
+      "entityId": "ref-001",
+      "createdAt": "2026-05-24T02:15:00.000Z"
+    }
+  ],
+  "clinikoSync": {
+    "status": "not_connected",
+    "lastSyncAt": null,
+    "message": "Add CLINIKO_API_KEY to enable live sync."
+  }
+}

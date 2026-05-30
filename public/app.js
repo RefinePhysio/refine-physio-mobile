@@ -1,0 +1,8030 @@
+const app = document.querySelector("#app");
+const AUTO_REFRESH_MS = 15000;
+const AUTO_REFRESH_RENDER_TABS = new Set([
+  "overview",
+  "inbox",
+  "adminReports",
+  "referrals",
+  "archived",
+  "cliniko",
+  "today",
+  "rebook",
+  "clients"
+]);
+const REPORT_PHOTO_LIMIT = 8;
+const REPORT_PHOTO_MAX_EDGE = 1400;
+const REPORT_PHOTO_QUALITY = 0.76;
+const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 2200000;
+
+const state = {
+  data: null,
+  autoRefreshInFlight: false,
+  loginLoading: false,
+  loginError: "",
+  forgotMessage: "",
+  forgotMode: false,
+  tab: new URLSearchParams(window.location.search).get("tab") || localStorage.getItem("refine-active-tab") || "",
+  search: "",
+  noteSearch: "",
+  patientFileClientId: "",
+  patientFileView: "details",
+  adminArchivedAppointmentId: "",
+  caseManagerProfileId: "",
+  editReferralId: "",
+  activeAppointmentId: "",
+  expandedSignedNoteAppointmentId: "",
+  calendarAppointmentId: "",
+  calendarAppointmentMode: "details",
+  calendarBookingStartLocal: "",
+  calendarBookingClientId: "",
+  calendarBookingPatientMode: "existing",
+  unavailableBlocks: loadUnavailableBlocks(),
+  unavailableBlockId: "",
+  unavailableBlockStartLocal: "",
+  unavailableBlockKind: "unavailable",
+  rebookClientId: "",
+  rebookFromAppointmentId: "",
+  rebookStatusClientId: "",
+  approvalClientId: "",
+  approvalAppointmentId: "",
+  calendarMode: localStorage.getItem("refine-calendar-mode") || "day",
+  calendarDateKey: localStorage.getItem("refine-calendar-date") || "",
+  calendarMonthOffset: Number(localStorage.getItem("refine-calendar-month-offset") || 0),
+  ownerView: localStorage.getItem("refine-owner-view") || "admin",
+  ownerPractitionerId: localStorage.getItem("refine-owner-practitioner") || "",
+  noteOutcomeMeasures: {},
+  reportClientId: "",
+  reportContractorId: "",
+  reportAppointmentId: "",
+  reportReminderAppointmentId: "",
+  reportDraftFields: {},
+  reportDraftKey: "",
+  reportDraftSummary: "",
+  reportEquipmentTrialCount: 0,
+  reportEquipmentOptionCounts: {},
+  messageThreadUserId: "",
+  reportType: "Initial Physiotherapy Assessment Report",
+  tabMenuOpen: false,
+  tabHistory: []
+};
+
+const adminTabs = [
+  ["overview", "Overview"],
+  ["inbox", "Approvals"],
+  ["messages", "Messages"],
+  ["users", "Users"],
+  ["caseManagers", "Case managers"],
+  ["companies", "Companies"],
+  ["adminReports", "Reports"],
+  ["referrals", "Referrals"],
+  ["archived", "Archived"],
+  ["cliniko", "Cliniko"]
+];
+
+const receptionistTabs = [
+  ["overview", "Overview"],
+  ["inbox", "Approvals"],
+  ["messages", "Messages"],
+  ["adminReports", "Reports"],
+  ["referrals", "Referrals"],
+  ["archived", "Archived"]
+];
+
+const contractorTabs = [
+  ["today", "Today"],
+  ["rebook", "Rebook"],
+  ["clients", "Clients"],
+  ["requests", "Approvals"],
+  ["updates", "Updates"],
+  ["messages", "Messages"]
+];
+
+const physioOutcomeMeasures = [
+  {
+    id: "10mwt",
+    label: "10MWT",
+    reference: "Usual community ambulation is commonly around 0.8 m/s or higher; limited community ambulation is often below 0.8 m/s."
+  },
+  {
+    id: "30secSts",
+    label: "30 sec STS",
+    reference: "Record total stands in 30 seconds. Compare against age and sex norms; lower scores indicate reduced lower-limb function."
+  },
+  {
+    id: "tug",
+    label: "TUG",
+    reference: "Less than 10 seconds is usually freely mobile; 10-20 seconds is often independent; more than 20 seconds suggests higher mobility limitation."
+  },
+  {
+    id: "bergBalance",
+    label: "Berg Balance Scale",
+    reference: "Score is out of 56. Scores below 45 are commonly associated with increased falls risk."
+  },
+  {
+    id: "5xSts",
+    label: "5x STS",
+    reference: "Record time to complete five stands. More than 15 seconds is commonly used as a marker of increased falls risk in older adults."
+  },
+  {
+    id: "4StageBalance",
+    label: "4 stage balance test",
+    reference: "Inability to hold tandem stance for 10 seconds is commonly associated with increased falls risk."
+  },
+  {
+    id: "fes1",
+    label: "Falls Efficacy Scale (FES-I)",
+    reference: "Total score ranges from 16-64. Higher scores indicate greater concern about falling."
+  },
+  {
+    id: "other",
+    label: "Other",
+    reference: "Custom measure entered by the practitioner. Add the relevant reference range or interpretation in the clinical note."
+  }
+];
+
+init();
+registerServiceWorker();
+
+async function init() {
+  await loadData();
+  startAutoRefresh();
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+
+async function loadData() {
+  try {
+    state.data = await fetchJson("/api/bootstrap");
+    state.loginError = "";
+    if (!state.data.reportTemplates.some((template) => template.type === state.reportType)) {
+      state.reportType = state.data.reportTemplates[0]?.type || "Initial Physiotherapy Assessment Report";
+    }
+    const tabs = currentTabs();
+    if (!tabs.some(([id]) => id === state.tab) && !hiddenTabs().includes(state.tab)) state.tab = tabs[0][0];
+    render();
+    void markApprovalResultsSeenForCurrentTab();
+  } catch (error) {
+    if (error.status === 401) {
+      state.data = null;
+      renderLogin();
+    } else {
+      app.innerHTML = `<main class="page"><div class="error">${escapeHtml(error.message)}</div></main>`;
+    }
+  }
+}
+
+function startAutoRefresh() {
+  window.setInterval(() => {
+    void autoRefreshData();
+  }, AUTO_REFRESH_MS);
+
+  window.addEventListener("focus", () => {
+    void autoRefreshData({ force: true });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void autoRefreshData({ force: true });
+  });
+}
+
+async function autoRefreshData(options = {}) {
+  if (!state.data || state.autoRefreshInFlight || document.hidden) return;
+  if (!options.force && autoRefreshShouldPause()) return;
+
+  state.autoRefreshInFlight = true;
+  const previousDigest = appointmentDataDigest(state.data);
+  try {
+    const nextData = await fetchJson("/api/bootstrap");
+    const nextDigest = appointmentDataDigest(nextData);
+    state.data = nextData;
+
+    if (!state.data.reportTemplates.some((template) => template.type === state.reportType)) {
+      state.reportType = state.data.reportTemplates[0]?.type || "Initial Physiotherapy Assessment Report";
+    }
+
+    const tabs = currentTabs();
+    if (!tabs.some(([id]) => id === state.tab) && !hiddenTabs().includes(state.tab)) state.tab = tabs[0][0];
+
+    const appointmentDataChanged = previousDigest !== nextDigest;
+    const shouldRender = appointmentDataChanged && AUTO_REFRESH_RENDER_TABS.has(state.tab);
+    if (shouldRender || state.tab === "cliniko") {
+      render();
+      void markApprovalResultsSeenForCurrentTab();
+      if (shouldRender) toast("Calendar updated from Cliniko");
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    state.autoRefreshInFlight = false;
+  }
+}
+
+function autoRefreshShouldPause() {
+  if (state.calendarBookingStartLocal || state.unavailableBlockId || state.unavailableBlockStartLocal || state.reportReminderAppointmentId || state.patientFileClientId) return true;
+  if (document.querySelector(".appointment-modal-backdrop")) return true;
+
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  const tagName = active.tagName || "";
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(tagName) || active.isContentEditable;
+}
+
+function appointmentDataDigest(data) {
+  if (!data) return "";
+  const appointments = (data.appointments || [])
+    .map((appointment) => ({
+      id: appointment.id,
+      clinikoId: appointment.clinikoId || "",
+      clientId: appointment.clientId || "",
+      contractorId: appointment.contractorId || "",
+      startsAt: appointment.startsAt || "",
+      endsAt: appointment.endsAt || "",
+      appointmentType: appointment.appointmentType || "",
+      recurrence: appointment.recurrence || "",
+      status: appointment.status || "",
+      syncStatus: appointment.syncStatus || "",
+      clinikoUpdatedAt: appointment.clinikoUpdatedAt || ""
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const clients = (data.clients || [])
+    .map((client) => ({
+      id: client.id,
+      name: client.name || "",
+      phone: client.phone || "",
+      address: client.address || "",
+      suburb: client.suburb || "",
+      clinikoUpdatedAt: client.clinikoUpdatedAt || ""
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return JSON.stringify({ appointments, clients });
+}
+
+function renderLogin() {
+  app.innerHTML = `
+    <main class="login-page">
+      <section class="login-panel" aria-label="Sign in">
+        <div class="login-brand text-brand-panel">
+          <div class="brand-text-lockup brand-text-lockup-login" aria-label="Refine Physio Mobile">
+            <span>Refine Physio</span><span>Mobile</span>
+          </div>
+          <p>Secure staff portal</p>
+        </div>
+        <div class="login-copy">
+          <h2>${state.forgotMode ? "Reset access" : "Sign in"}</h2>
+          <p>${state.forgotMode ? "Enter your email and ask an admin to reset your password." : "Use your staff account to open your dashboard."}</p>
+        </div>
+        ${state.loginError ? `<div class="form-error" role="alert">${escapeHtml(state.loginError)}</div>` : ""}
+        ${state.forgotMessage ? `<div class="form-success" role="status">${escapeHtml(state.forgotMessage)}</div>` : ""}
+        ${state.forgotMode ? renderForgotPasswordForm() : renderLoginForm()}
+      </section>
+    </main>
+  `;
+  bindLoginEvents();
+}
+
+function renderLoginForm() {
+  return `
+    <form class="login-form" id="login-form">
+      <label>Email
+        <input name="email" type="email" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" ${state.loginLoading ? "disabled" : ""}>
+        ${state.loginLoading ? "Signing in..." : "Sign in"}
+      </button>
+      <button type="button" class="ghost" data-action="forgot-password">Forgot password?</button>
+    </form>
+  `;
+}
+
+function renderForgotPasswordForm() {
+  return `
+    <form class="login-form" id="forgot-password-form">
+      <label>Email
+        <input name="email" type="email" autocomplete="username" required>
+      </label>
+      <button type="submit" ${state.loginLoading ? "disabled" : ""}>
+        ${state.loginLoading ? "Sending..." : "Request reset"}
+      </button>
+      <button type="button" class="ghost" data-action="back-to-login">Back to sign in</button>
+    </form>
+  `;
+}
+
+function render() {
+  if (!state.data) {
+    renderLogin();
+    return;
+  }
+  const data = state.data;
+  const user = data.currentUser;
+  const isAdmin = user.role === "admin";
+  const isOwner = canUseOwnerWorkspace();
+  const practitionerView = ownerViewingPractitioner();
+  const practitioner = currentCalendarPractitioner();
+
+  app.innerHTML = `
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <div class="brand-lockup">
+            <div class="brand-text-lockup brand-text-lockup-header" aria-label="Refine Physio Mobile">
+              <span>Refine Physio</span><span>Mobile</span>
+            </div>
+            <span class="brand-userline">${escapeHtml(user.name)} - ${escapeHtml(user.discipline)}</span>
+          </div>
+          <div class="top-actions ${isOwner ? "has-owner-switch" : ""}">
+            <label class="top-search-control">
+              <span>Search</span>
+              <input id="global-search" type="search" value="${escapeHtml(state.search)}" placeholder="Client, suburb, referral">
+            </label>
+            ${isOwner ? renderOwnerViewSelect() : ""}
+            <div class="account-actions">
+              ${statusPill(isOwner ? "Owner" : roleLabel(user.role), user.role === "admin" ? "blue" : user.role === "receptionist" ? "gold" : "")}
+              <button type="button" class="secondary" data-action="logout">Logout</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="page">
+        <section class="identity-band">
+          <div>
+            <h2>${practitionerView ? `Practitioner view: ${escapeHtml(practitioner?.name || "Practitioner")}` : isAdmin ? "Mobile operations dashboard" : "Refine Physio Mobile Software"}</h2>
+            <p>${practitionerView ? "Today's jobs, client records, notes, reports, and messages." : isAdmin ? "Approvals, reports, referrals, users, and Cliniko sync in one place." : "Welcome! We're so happy to have you on our team :)"}</p>
+          </div>
+          <div class="status-strip">
+            ${statusPill(data.clinikoSync.status === "connected" ? "Cliniko connected" : "Cliniko pending", data.clinikoSync.status === "connected" ? "blue" : "gold")}
+            ${statusPill(isOwner ? "Owner access" : isAdmin ? "Admin access" : "Assigned clients only")}
+          </div>
+        </section>
+
+        ${renderKpis()}
+        ${renderTabs()}
+        <section class="view" id="view">${renderView()}</section>
+        ${renderAppointmentDetailModal()}
+        ${renderCalendarBookingModal()}
+        ${renderUnavailableBlockModal()}
+        ${renderReportReminderModal()}
+        ${renderPatientFileModal()}
+        ${renderArchivedAppointmentDetailModal()}
+        ${renderCaseManagerProfileModal()}
+      </main>
+    </div>
+  `;
+
+  bindEvents();
+  void markVisibleMessagesRead();
+}
+
+function renderKpis() {
+  const data = state.data;
+  const practitionerMode = data.currentUser.role === "contractor" || ownerViewingPractitioner();
+  const appointments = practitionerMode ? appointmentsForPractitioner(data.appointments) : data.appointments;
+  const approvalRequests = practitionerMode
+    ? (data.approvalRequests || []).filter((request) => request.contractorId === currentCalendarPractitionerId())
+    : (data.approvalRequests || []);
+  const incompleteNotes = appointments.filter((appointment) =>
+    appointmentNotesDue(appointment) && dueBucket(appointment) !== "upcoming"
+  ).length;
+  const todayAppointments = appointmentsForDay(appointments, new Date()).filter((appointment) => appointment.status !== "cancelled");
+  const patientsToday = new Set(todayAppointments.map((appointment) => appointment.clientId)).size;
+  const reportsDue = appointments.filter((appointment) =>
+    appointmentReportDue(appointment) && reportDueBucket(appointment) !== "upcoming"
+  ).length;
+  const activeApprovalItems = activeApprovalInboxItems(data.inboxItems || []).length;
+  const reportReviewReminders = adminReportReminderReports().length;
+  const unreadMessageCount = unreadDirectMessages().length;
+  const newApprovals = unreadApprovalResultNotifications().length;
+  const approvalInboxDue = activeApprovalRequests(approvalRequests).length;
+
+  const kpis = [
+    ["Patients today", patientsToday, "today"],
+    ["Notes due", incompleteNotes, "notes-due"],
+    ["Reports due", reportsDue, "reports-due"]
+  ];
+
+  if (["admin", "receptionist"].includes(data.currentUser.role) && !practitionerMode) {
+    kpis.push(["Reports to review", reportReviewReminders, "adminReports"]);
+    kpis.push(["Approvals", activeApprovalItems || approvalInboxDue, "inbox"]);
+    kpis.push(["Unread messages", unreadMessageCount, "messages"]);
+  } else {
+    kpis.push(["Unread messages", unreadMessageCount, "messages"]);
+    kpis.push(["New approval received", newApprovals, "requests"]);
+  }
+
+  return `<section class="kpi-grid">${kpis.map(([label, value, action]) => `<button class="kpi" data-action="kpi-nav" data-target="${action}"><strong>${value}</strong><span>${escapeHtml(label)}</span></button>`).join("")}</section>`;
+}
+
+function unreadApprovalResultNotifications() {
+  return notificationsForPractitionerWorkspace().filter((item) => item.type === "approval_result" && !item.read);
+}
+
+function unreadDirectMessages() {
+  return (state.data?.messages || []).filter((message) =>
+    message.toUserId === state.data.currentUser.id
+    && !(message.readBy || []).includes(state.data.currentUser.id)
+  );
+}
+
+async function markApprovalResultsSeenForCurrentTab() {
+  if (state.tab !== "requests" || state.data?.currentUser.role !== "contractor") return;
+
+  const unread = unreadApprovalResultNotifications();
+  if (!unread.length) return;
+
+  const ids = unread.map((item) => item.id);
+  const readAt = new Date().toISOString();
+  unread.forEach((item) => {
+    item.read = true;
+    item.readAt = readAt;
+  });
+  render();
+
+  try {
+    await fetchJson("/api/notifications/read", {
+      method: "PATCH",
+      body: {
+        userId: state.data.currentUser.id,
+        ids,
+        types: ["approval_result"]
+      }
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function markVisibleMessagesRead() {
+  if (state.tab !== "messages" || !state.data?.currentUser) return;
+  const threadUserId = visibleMessageThreadUserId();
+  if (!threadUserId) return;
+  const unread = unreadMessagesFromUser(threadUserId);
+  if (!unread.length) return;
+
+  const currentUserId = state.data.currentUser.id;
+  unread.forEach((message) => {
+    message.readBy ||= [];
+    if (!message.readBy.includes(currentUserId)) message.readBy.push(currentUserId);
+  });
+  render();
+
+  try {
+    await fetchJson("/api/messages/read", {
+      method: "PATCH",
+      body: { fromUserId: threadUserId }
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function visibleMessageThreadUserId() {
+  if (!state.data?.currentUser) return "";
+  if (state.data.currentUser.role === "contractor") return adminUser()?.id || "";
+  const users = messageThreadUsers();
+  return selectedMessageThreadUser(users)?.id || "";
+}
+
+async function markNotificationRead(notificationId) {
+  const notification = (state.data?.notifications || []).find((item) => item.id === notificationId);
+  if (!notification || notification.read) return;
+
+  notification.read = true;
+  notification.readAt = new Date().toISOString();
+  render();
+
+  try {
+    await fetchJson("/api/notifications/read", {
+      method: "PATCH",
+      body: {
+        userId: state.data.currentUser.id,
+        ids: [notificationId]
+      }
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function renderTabs() {
+  const tabs = currentTabs();
+  const activeIndex = Math.max(0, tabs.findIndex(([id]) => id === state.tab));
+  const activeLabel = tabLabel(state.tab) || tabs[activeIndex]?.[1] || "Menu";
+  const previousTab = previousTabId();
+  return `
+    <div class="tab-shell ${state.tabMenuOpen ? "open" : ""}">
+      <button class="tab-history-back" type="button" data-action="tab-back" ${previousTab ? "" : "disabled"} aria-label="Go back to previous page">
+        Back
+      </button>
+      <button class="tab-menu-toggle" type="button" data-action="toggle-tab-menu" aria-expanded="${state.tabMenuOpen ? "true" : "false"}" aria-controls="section-tabs">
+        <span>Menu</span>
+        <strong>${escapeHtml(activeLabel)}</strong>
+      </button>
+      <nav class="tabs" id="section-tabs" aria-label="App sections">
+        ${tabs.map(([id, label]) => `
+          <button class="tab ${state.tab === id ? "active" : ""}" data-action="set-tab" data-tab="${id}" type="button">
+            <span>${escapeHtml(label)}</span>
+            ${tabBadgeCount(id) ? `<em class="tab-badge">${tabBadgeCount(id)}</em>` : ""}
+          </button>
+        `).join("")}
+      </nav>
+      <button class="tab-step tab-step-next" type="button" data-action="tab-step" data-step="1" ${tabs.length <= 1 ? "disabled" : ""} aria-label="Show more tabs">Next</button>
+    </div>
+  `;
+}
+
+function setActiveTab(tabId) {
+  if (!tabId) return;
+  rememberTab(state.tab);
+  state.tab = tabId;
+  state.tabMenuOpen = false;
+  if (state.tab !== "messages") state.messageThreadUserId = "";
+  localStorage.setItem("refine-active-tab", state.tab);
+}
+
+function rememberTab(tabId) {
+  if (!tabId || tabId === state.tabHistory.at(-1)) return;
+  state.tabHistory = [...state.tabHistory, tabId].slice(-10);
+}
+
+function previousTabId() {
+  const validTabs = new Set([...currentTabs().map(([id]) => id), ...hiddenTabs()]);
+  while (state.tabHistory.length && (!validTabs.has(state.tabHistory.at(-1)) || state.tabHistory.at(-1) === state.tab)) {
+    state.tabHistory.pop();
+  }
+  return state.tabHistory.at(-1) || "";
+}
+
+function goBackToPreviousTab() {
+  const previous = previousTabId();
+  if (!previous) return;
+  state.tabHistory.pop();
+  state.tab = previous;
+  state.tabMenuOpen = false;
+  if (state.tab !== "messages") state.messageThreadUserId = "";
+  localStorage.setItem("refine-active-tab", state.tab);
+}
+
+function tabLabel(tabId) {
+  return new Map([
+    ...adminTabs,
+    ...receptionistTabs,
+    ...contractorTabs,
+    ["notes", "Notes"],
+    ["reports", "Reports"],
+    ["notesDue", "Notes due"],
+    ["reportsDue", "Reports due"]
+  ]).get(tabId) || "";
+}
+
+function tabBadgeCount(tabId) {
+  const role = state.data?.currentUser?.role || "";
+  const practitionerMode = role === "contractor" || ownerViewingPractitioner();
+  if (tabId === "messages") return unreadDirectMessages().length;
+  if (!["admin", "receptionist"].includes(role) || practitionerMode) return 0;
+  if (tabId === "adminReports") return adminReportReminderReports().length;
+  if (tabId === "inbox") {
+    return activeApprovalInboxItems(state.data.inboxItems || []).length;
+  }
+  return 0;
+}
+
+function adjacentTabId(step) {
+  const tabButtons = [...document.querySelectorAll("[data-action='set-tab']")];
+  const tabIds = tabButtons.map((button) => button.dataset.tab).filter(Boolean);
+  const fallbackIds = currentTabs().map(([id]) => id);
+  const ids = tabIds.length ? tabIds : fallbackIds;
+  const currentIndex = Math.max(0, ids.indexOf(state.tab));
+  const nextIndex = Math.max(0, Math.min(ids.length - 1, currentIndex + step));
+  return ids[nextIndex] || state.tab;
+}
+
+function scrollTabList(step = 1) {
+  const tabs = document.querySelector("#section-tabs");
+  if (!tabs) return;
+
+  const style = window.getComputedStyle(tabs);
+  if (style.display === "none") {
+    state.tabMenuOpen = true;
+    render();
+    window.requestAnimationFrame(() => scrollTabList(step));
+    return;
+  }
+
+  const isVerticalMenu = style.flexDirection === "column";
+  const distance = isVerticalMenu
+    ? Math.max(tabs.clientHeight * 0.75, 220)
+    : Math.max(tabs.clientWidth * 0.75, 260);
+
+  tabs.scrollBy({
+    left: isVerticalMenu ? 0 : distance * step,
+    top: isVerticalMenu ? distance * step : 0,
+    behavior: "smooth"
+  });
+}
+
+function renderView() {
+  const role = state.data.currentUser.role;
+  const isOperations = role === "admin" || role === "receptionist";
+  const practitionerView = role === "contractor" || ownerViewingPractitioner();
+  if (practitionerView) {
+    if (state.tab === "clients") return renderClients();
+    if (state.tab === "rebook") return renderRebook();
+    if (state.tab === "requests") return renderRequests();
+    if (state.tab === "updates") return renderContractorUpdates();
+    if (state.tab === "messages" && ownerViewingPractitioner()) return renderAdminMessages();
+    if (state.tab === "messages") return renderContractorMessages();
+    if (state.tab === "notes") return renderNotes();
+    if (state.tab === "reports") return renderReports();
+    if (state.tab === "notesDue") return renderNotesDueList();
+    if (state.tab === "reportsDue") return renderReportsDueList();
+    return renderContractorToday();
+  }
+
+  if (isOperations) {
+    if (state.tab === "inbox") return renderAdminInbox();
+    if (state.tab === "messages") return renderAdminMessages();
+    if (state.tab === "users" && role === "admin") return renderUserManagement();
+    if (state.tab === "caseManagers" && role === "admin") return renderCaseManagers();
+    if (state.tab === "companies" && role === "admin") return renderReferralCompanies();
+    if (state.tab === "adminReports") return renderAdminReports();
+    if (state.tab === "referrals") return renderAdminReferrals();
+    if (state.tab === "archived") return renderAdminArchivedAppointments();
+    if (state.tab === "schedule") return renderSchedule(true);
+    if (state.tab === "notes") return renderNotes();
+    if (state.tab === "reports") return renderReports();
+    if (state.tab === "cliniko" && role === "admin") return renderCliniko();
+    if (state.tab === "notesDue") return renderNotesDueList();
+    if (state.tab === "reportsDue") return renderReportsDueList();
+    return renderAdminOverview();
+  }
+
+  return renderContractorToday();
+}
+
+function renderAdminOverview() {
+  const data = state.data;
+  const approvalRequests = activeApprovalRequests(filterItems(data.approvalRequests));
+  const reportReviewItems = sortInboxItems(filterItems(data.inboxItems || []))
+    .filter((item) => item.sourceType === "report_copy" && !["resolved", "closed"].includes(item.status));
+  const reportReminders = adminReportReminderReports(filterItems(data.reports || []));
+  const reportsDue = sortAppointments(filterItems(data.appointments)
+    .filter((appointment) => appointmentReportDue(appointment) && reportDueBucket(appointment) !== "upcoming"));
+  const incompleteNotes = sortAppointments(filterItems(data.appointments)
+    .filter((appointment) => appointmentNotesDue(appointment) && dueBucket(appointment) !== "upcoming"));
+
+  return `
+    ${renderAdminReportReminderBanner(reportReminders)}
+    <section class="overview-summary" aria-label="Overview totals">
+      <article>
+        <strong>${approvalRequests.length}</strong>
+        <span>Approval requests</span>
+      </article>
+      <article>
+        <strong>${reportReminders.length}</strong>
+        <span>Reports needing admin</span>
+      </article>
+      <article>
+        <strong>${reportsDue.length}</strong>
+        <span>Reports still due</span>
+      </article>
+      <article>
+        <strong>${incompleteNotes.length}</strong>
+        <span>Notes not completed</span>
+      </article>
+    </section>
+    <div class="overview-board">
+      <section class="section overview-panel overview-panel-wide">
+        <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
+        <div class="grid">
+          ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
+        </div>
+      </section>
+      <section class="section overview-panel overview-panel-wide">
+        <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
+        <div class="grid">
+          ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
+        </div>
+      </section>
+      <section class="section overview-panel">
+        <div class="section-heading"><h3>Reports still due</h3><span>${reportsDue.length} incomplete</span></div>
+        <div class="overview-list">
+          ${reportsDue.map(renderAdminReportDueCard).join("") || emptyState("No reports are due.")}
+        </div>
+      </section>
+      <section class="section overview-panel">
+        <div class="section-heading"><h3>Notes not completed</h3><span>${incompleteNotes.length} due</span></div>
+        <div class="overview-list">
+          ${incompleteNotes.map(renderAdminNoteDueCard).join("") || emptyState("No notes are overdue or due today.")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderAdminInbox() {
+  const inboxItems = sortInboxItems(filterItems(approvalInboxItems(state.data.inboxItems || [])));
+  const activeItems = inboxItems.filter((item) => !["resolved", "closed"].includes(item.status));
+  const newItems = activeItems.filter((item) => item.status === "new");
+  const inProgressItems = activeItems.filter((item) => item.status === "in_progress");
+  const waitingItems = activeItems.filter((item) => item.status === "waiting");
+  const resolvedItems = inboxItems.filter((item) => ["resolved", "closed"].includes(item.status));
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Approvals</h3><span>${activeItems.length} active</span></div>
+      <div class="inbox-summary">
+        <article><strong>${newItems.length}</strong><span>New approvals</span></article>
+        <article><strong>${inProgressItems.length}</strong><span>Being actioned</span></article>
+        <article><strong>${waitingItems.length}</strong><span>Waiting with case manager</span></article>
+        <article><strong>${resolvedItems.length}</strong><span>Resolved</span></article>
+      </div>
+      <div class="grid">
+        ${activeItems.map(renderInboxItemCard).join("") || emptyState("No active approval requests. Equipment trial, ongoing physio, frequency change, and other case-manager approvals will appear here.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminMessages() {
+  const contractors = messageThreadUsers();
+  const selectedUser = selectedMessageThreadUser(contractors);
+  const thread = selectedUser ? messagesForThread(selectedUser.id) : [];
+  const unreadCount = unreadDirectMessages().length;
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Messages</h3><span>${unreadCount ? `${unreadCount} unread` : `${(state.data.messages || []).length} total`}</span></div>
+      ${renderMessageInboxAlert(unreadCount)}
+      <div class="chat-layout">
+        <aside class="chat-thread-list" aria-label="Practitioner conversations">
+          ${contractors.map((user) => {
+            const latest = latestMessageForUser(user.id);
+            const unread = unreadMessagesFromUser(user.id).length;
+            return `
+              <button type="button" class="${selectedUser?.id === user.id ? "active" : ""} ${unread ? "is-unread" : ""}" data-action="message-thread" data-user-id="${escapeHtml(user.id)}">
+                <strong>${escapeHtml(user.name)}</strong>
+                <span>${latest ? escapeHtml(latest.body) : "No messages yet"}</span>
+                ${unread ? `<em>${unread} new</em>` : ""}
+              </button>
+            `;
+          }).join("") || emptyState("No practitioner threads yet.")}
+        </aside>
+        <section class="chat-panel">
+          ${selectedUser ? `
+            <div class="section-heading"><h3>${escapeHtml(selectedUser.name)}</h3><span>${unreadMessagesFromUser(selectedUser.id).length ? "New messages" : "Direct message"}</span></div>
+            ${renderMessageList(thread)}
+            ${renderMessageForm(selectedUser.id, "Reply to practitioner")}
+          ` : emptyState("Choose a practitioner conversation.")}
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminReports() {
+  const reports = completedReportsForAdmin(filterItems(state.data.reports || []));
+  const reportReminders = adminReportReminderReports(reports);
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Reports</h3><span>${reports.length} completed</span></div>
+      ${renderAdminReportReminderBanner(reportReminders, "reports")}
+      <div class="report-admin-list">
+        ${reports.map(renderAdminReportRow).join("") || emptyState("No completed initial or equipment trial reports yet.")}
+      </div>
+    </section>
+  `;
+}
+
+function adminReportReminderReports(reports = state.data?.reports || []) {
+  return completedReportsForAdmin(reports)
+    .filter((report) => !report.caseManagerSentAt)
+    .sort((a, b) => new Date(b.adminCopySentAt || b.signedAt || b.updatedAt || b.createdAt || 0) - new Date(a.adminCopySentAt || a.signedAt || a.updatedAt || a.createdAt || 0));
+}
+
+function renderAdminReportReminderBanner(reports, context = "overview") {
+  if (!reports.length) return "";
+  const visibleReports = reports.slice(0, context === "reports" ? 2 : 3);
+  return `
+    <section class="admin-report-reminder" aria-live="polite">
+      <div class="admin-report-reminder-main">
+        <span>${reports.length}</span>
+        <div>
+          <h3>${reports.length === 1 ? "Report completed and waiting for admin" : "Reports completed and waiting for admin"}</h3>
+          <p>Initial assessment and equipment trial reports stay here until admin reviews them and marks them sent to the case manager.</p>
+        </div>
+      </div>
+      <div class="admin-report-reminder-list">
+        ${visibleReports.map((report) => `
+          <article>
+            <strong>${escapeHtml(clientName(report.clientId))}</strong>
+            <span>${escapeHtml(report.type)} - ${escapeHtml(userName(report.contractorId))} - ${formatDateTime(report.adminCopySentAt || report.signedAt || report.updatedAt || report.createdAt)}</span>
+          </article>
+        `).join("")}
+      </div>
+      <div class="actions">
+        <button type="button" data-action="set-tab" data-tab="adminReports">Review reports</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderCaseManagers() {
+  const caseManagers = filterItems(state.data.caseManagers || []);
+  const clients = filterItems(state.data.clients || []).sort((a, b) => clientName(a.id).localeCompare(clientName(b.id)));
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Case managers</h3><span>${caseManagers.length} saved</span></div>
+      <form class="card form-grid compact-form" id="case-manager-form">
+        ${input("name", "Name", "text", true)}
+        ${input("email", "Email", "email")}
+        ${input("mobile", "Mobile", "tel")}
+        ${companyInput("organisation", "Company / provider")}
+        ${textarea("notes", "Notes", "full")}
+        ${renderCompanyDatalist()}
+        <div class="form-actions full">
+          <button type="submit">Save case manager</button>
+        </div>
+      </form>
+    </section>
+    <section class="section">
+      <div class="section-heading"><h3>Saved case managers</h3><span>Edit contact details</span></div>
+      <div class="grid cards-3">
+        ${caseManagers.map(renderCaseManagerCard).join("") || emptyState("No case managers saved yet.")}
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-heading"><h3>Assign to patients</h3><span>${clients.length} patients</span></div>
+      <div class="overview-list">
+        ${clients.map(renderPatientCaseManagerRow).join("") || emptyState("No patients found.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderCaseManagerCard(caseManager) {
+  const assignedCount = caseManagerProfilePatients(caseManager.id).length;
+  return `
+    <form class="card form-grid compact-form case-manager-card" data-case-manager-edit-form data-id="${escapeHtml(caseManager.id)}">
+      <div class="section-heading full">
+        <h4>${escapeHtml(caseManager.name)}</h4>
+        ${statusPill(`${assignedCount} patient${assignedCount === 1 ? "" : "s"}`, assignedCount ? "blue" : "gold")}
+      </div>
+      ${input("name", "Name", "text", true, "full", caseManager.name)}
+      ${input("email", "Email", "email", false, "", caseManager.email || "")}
+      ${input("mobile", "Mobile", "tel", false, "", caseManager.mobile || "")}
+      ${companyInput("organisation", "Company / provider", caseManager.organisation || "", "full")}
+      ${textarea("notes", "Notes", "full", caseManager.notes || "")}
+      <div class="form-actions full">
+        <button type="button" data-action="case-manager-profile" data-id="${escapeHtml(caseManager.id)}">Open profile</button>
+        <button type="submit" class="secondary">Update</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderCaseManagerProfileModal() {
+  if (!state.caseManagerProfileId || state.data.currentUser?.role !== "admin") return "";
+  const caseManager = (state.data.caseManagers || []).find((item) => item.id === state.caseManagerProfileId);
+  if (!caseManager) return "";
+  const patients = caseManagerProfilePatients(caseManager.id);
+
+  return `
+    <div class="appointment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="case-manager-profile-title">
+      <article class="appointment-modal case-manager-profile-modal">
+        <header class="appointment-modal-header">
+          <div>
+            <h3 id="case-manager-profile-title">${escapeHtml(caseManager.name)}</h3>
+            <p>${escapeHtml(caseManager.organisation || "No company selected")}</p>
+            <strong>${patients.length} linked patient${patients.length === 1 ? "" : "s"}</strong>
+          </div>
+          <button type="button" class="appointment-modal-close" data-action="case-manager-profile-close" aria-label="Close case manager profile">&times;</button>
+        </header>
+        <div class="appointment-modal-body single-column case-manager-profile-body">
+          <section class="case-manager-profile-grid">
+            <article>
+              <strong>Email</strong>
+              <span>${escapeHtml(caseManager.email || "Not recorded")}</span>
+            </article>
+            <article>
+              <strong>Mobile</strong>
+              <span>${escapeHtml(caseManager.mobile || "Not recorded")}</span>
+            </article>
+            <article>
+              <strong>Company</strong>
+              <span>${escapeHtml(caseManager.organisation || "Not recorded")}</span>
+            </article>
+          </section>
+          ${caseManager.notes ? `
+            <section class="case-manager-notes">
+              <strong>Notes</strong>
+              <p>${escapeHtml(caseManager.notes)}</p>
+            </section>
+          ` : ""}
+          <section>
+            <div class="section-heading">
+              <h4>Linked patients</h4>
+              <span>${patients.length} current</span>
+            </div>
+            <div class="case-manager-patient-list">
+              ${patients.map((item) => `
+                <article class="case-manager-patient-row">
+                  <div>
+                    ${patientNameButton(item.client.id, item.client.name || item.referral.clientName || "Client")}
+                    <span>${escapeHtml([item.client.phone || item.referral.phone, item.client.fundingType || item.referral.fundingType].filter(Boolean).join(" | ") || "No contact/funding recorded")}</span>
+                  </div>
+                  <div>
+                    ${statusPill(item.referral.status || "current")}
+                    <span>${escapeHtml(item.referral.assignedContractorId ? userName(item.referral.assignedContractorId) : "Unassigned")}</span>
+                  </div>
+                </article>
+              `).join("") || emptyState("No patients linked to this case manager yet.")}
+            </div>
+          </section>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderPatientCaseManagerRow(client) {
+  const current = caseManagerForClient(client);
+  return `
+    <article class="card compact patient-case-manager-row">
+      <div>
+        <strong>${patientNameButton(client.id, client.name || clientName(client.id))}</strong>
+        <span>${escapeHtml(client.phone || client.email || client.address || "No contact recorded")}</span>
+      </div>
+      <label>
+        Case manager
+        <select data-action="assign-case-manager" data-client-id="${escapeHtml(client.id)}">
+          <option value="">No case manager</option>
+          ${(state.data.caseManagers || []).map((caseManager) => `
+            <option value="${escapeHtml(caseManager.id)}" ${caseManager.id === (client.caseManagerId || "") ? "selected" : ""}>
+              ${escapeHtml(caseManagerLabel(caseManager))}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+      <span>${current ? escapeHtml(caseManagerContactLine(current)) : "Not assigned"}</span>
+    </article>
+  `;
+}
+
+function renderReferralCompanies() {
+  const groups = companyReferralGroups();
+  const providerGroups = groups.filter((group) => group.company !== "No company selected");
+  const totalReferrals = groups.reduce((sum, group) => sum + group.clients.length, 0);
+  const totalCaseManagers = groups.reduce((sum, group) => sum + group.managers.length, 0);
+
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h3>Aged care provider companies</h3>
+        <span>${providerGroups.length} companies tracked</span>
+      </div>
+      <div class="overview-summary company-summary">
+        <article><strong>${providerGroups.length}</strong><span>Provider companies</span></article>
+        <article><strong>${totalCaseManagers}</strong><span>Case managers saved</span></article>
+        <article><strong>${totalReferrals}</strong><span>Current referred patients</span></article>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-heading">
+        <h3>Company directory</h3>
+        <span>Case managers and referred patients</span>
+      </div>
+      <div class="company-tracker-grid">
+        ${groups.map(renderCompanyReferralCard).join("") || emptyState("No companies found. Add company/provider names to saved case managers first.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderCompanyReferralCard(group) {
+  const caseManagerCount = group.managers.length;
+  const patientCount = group.clients.length;
+  const practitionerCount = group.practitionerIds?.size || 0;
+  return `
+    <article class="card company-group-card">
+      <div class="section-heading">
+        <h4>${escapeHtml(group.company)}</h4>
+        ${statusPill(`${patientCount} patient${patientCount === 1 ? "" : "s"}`, patientCount ? "blue" : "gold")}
+      </div>
+      <div class="company-metrics">
+        <article><strong>${caseManagerCount}</strong><span>Case manager${caseManagerCount === 1 ? "" : "s"}</span></article>
+        <article><strong>${patientCount}</strong><span>Current patient${patientCount === 1 ? "" : "s"} referred</span></article>
+        <article><strong>${practitionerCount}</strong><span>Practitioner${practitionerCount === 1 ? "" : "s"} involved</span></article>
+      </div>
+      <div class="company-manager-list">
+        ${group.managers.map((manager) => `
+          <section class="company-manager-block">
+            <div class="company-manager-heading">
+              <div>
+                <strong>${escapeHtml(manager.name)}</strong>
+                <span>${escapeHtml(manager.contact || "No contact details")}</span>
+              </div>
+              ${statusPill(`${manager.clients.length} referred`, manager.clients.length ? "blue" : "gold")}
+            </div>
+            <div class="company-client-list">
+              ${manager.clients.length ? manager.clients.map((item) => `
+                <div class="company-client-row">
+                  <div>
+                    ${patientNameButton(item.client.id, item.client.name || item.referral.clientName || "Client")}
+                    <span>${escapeHtml([item.client.phone || item.referral.phone, item.client.fundingType || item.referral.fundingType].filter(Boolean).join(" | ") || "No contact/funding recorded")}</span>
+                  </div>
+                  <div>
+                    ${statusPill(item.referral.status || "current")}
+                    ${item.referral.assignedContractorId ? `<span>${escapeHtml(userName(item.referral.assignedContractorId))}</span>` : ""}
+                  </div>
+                </div>
+              `).join("") : `<p class="company-empty">No current referred patients for this case manager.</p>`}
+            </div>
+          </section>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAdminReportRow(report) {
+  const appointment = appointmentById(report.appointmentId);
+  const sent = Boolean(report.caseManagerSentAt);
+
+  return `
+    <article class="card admin-report-row ${sent ? "" : "requires-admin-review"}">
+      <div class="admin-report-main">
+        <div>
+          <strong>${escapeHtml(clientName(report.clientId))}</strong>
+          <span>${escapeHtml(report.type)}</span>
+        </div>
+        <div>
+          <strong>${escapeHtml(userName(report.contractorId))}</strong>
+          <span>${appointment ? `${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}` : formatDateTime(report.updatedAt || report.createdAt)}</span>
+        </div>
+        <div>
+          ${sent ? "" : statusPill("admin review needed", "coral")}
+          ${statusPill(sent ? "sent to case manager" : "ready to send", sent ? "" : "blue")}
+          ${sent ? `<span class="report-sent-date">${formatDateTime(report.caseManagerSentAt)}</span>` : ""}
+        </div>
+        <div>
+          ${renderClinikoReportUploadStatus(report)}
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" class="${sent ? "" : "secondary"}" data-action="report-case-manager" data-id="${escapeHtml(report.id)}" aria-pressed="${sent ? "true" : "false"}">Sent to case manager</button>
+        <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(report.id)}">Open report</button>
+        <a class="button secondary" href="/api/reports/${escapeHtml(report.id)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
+        ${renderClinikoReportUploadButton(report)}
+      </div>
+    </article>
+  `;
+}
+
+function renderAdminReferrals() {
+  const referrals = filterItems(state.data.referrals);
+  const bookedPatients = bookedNewPatientReferrals(referrals);
+  const canCreateReferral = state.data.currentUser?.role === "admin";
+
+  return `
+    ${canCreateReferral ? renderReferralCreateForm() : ""}
+    <section class="section">
+      <div class="section-heading"><h3>New patients booked in</h3><span>${bookedPatients.length} booked</span></div>
+      <div class="grid cards-3">
+        ${bookedPatients.map(renderBookedNewPatientCard).join("") || emptyState("No new patients have been booked in yet.")}
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-heading"><h3>Referrals</h3><span>${referrals.length} synced records</span></div>
+      <div class="grid">
+        ${referrals.map(renderReferralCard).join("") || emptyState("No referrals found. Synced Cliniko referrals will appear here.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderReferralCreateForm() {
+  return `
+    <section class="section referral-management-section">
+      <div class="section-heading"><h3>Add referral</h3><span>Admin</span></div>
+      <form class="card form-grid dense-form referral-create-form" id="referral-form">
+        ${input("clientName", "Patient name", "text", true)}
+        ${input("phone", "Mobile", "tel")}
+        ${input("email", "Email", "email")}
+        ${input("address", "Address", "text", false, "full")}
+        ${input("suburb", "Suburb")}
+        ${select("fundingType", "Funding", ["", "Home Care Package", "CHSP", "SAH", "NDIS", "Private", "Other"])}
+        ${select("serviceTypeRequired", "Service", ["Physiotherapy"], "Physiotherapy")}
+        ${select("urgency", "Urgency", ["Low", "Medium", "High", "Urgent"], "Medium")}
+        ${select("assignedContractorId", "Assign practitioner", contractorOptions(true))}
+        ${input("referralSource", "Referral source / company")}
+        ${select("caseManagerId", "Case manager", caseManagerOptions(true))}
+        ${textarea("reasonForReferral", "Reason for referral", "full")}
+        ${textarea("risks", "Risk alerts", "full")}
+        <div class="form-actions full">
+          <button type="submit">Add referral</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderAdminArchivedAppointments() {
+  const archivedAppointments = sortArchivedAppointments(filterArchivedAppointments(state.data.archivedAppointments || []));
+  const canDeleteHistory = state.data.currentUser?.role === "admin";
+
+  return `
+    <section class="section">
+      <div class="section-heading archived-history-heading">
+        <div>
+          <h3>Archived appointments</h3>
+          <span>${archivedAppointments.length} archived</span>
+        </div>
+        ${canDeleteHistory && archivedAppointments.length ? `
+          <button type="button" class="danger" data-action="archived-appointments-clear">Clear all history</button>
+        ` : ""}
+      </div>
+      <div class="overview-list archived-appointment-list">
+        ${archivedAppointments.map(renderArchivedAppointmentCard).join("") || emptyState("No archived appointments yet.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderArchivedAppointmentCard(appointment) {
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const archivedBy = appointment.archivedBy ? userName(appointment.archivedBy) : "Not recorded";
+  const createdBy = appointment.createdBy ? userName(appointment.createdBy) : "Not recorded";
+
+  return `
+    <article class="card compact archived-appointment-card">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, client.name || clientName(appointment.clientId))}</h4>
+        ${statusPill("archived", "coral")}
+      </div>
+      <div class="detail-list">
+        <div><strong>Appointment</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
+        <div><strong>Type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Not recorded")}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+        <div><strong>Archived by</strong>${escapeHtml(archivedBy)}</div>
+        <div><strong>Archived on</strong>${appointment.archivedAt ? formatDateTime(appointment.archivedAt) : "Not recorded"}</div>
+        <div><strong>Booked by</strong>${escapeHtml(createdBy)}</div>
+        <div><strong>Address</strong>${escapeHtml(appointment.address || client.address || "No address recorded")}</div>
+      </div>
+      <div class="mini-actions">
+        <button type="button" class="secondary" data-action="archived-appointment-open" data-id="${escapeHtml(appointment.id)}">View history</button>
+        ${state.data.currentUser?.role === "admin" ? `<button type="button" class="danger" data-action="archived-appointment-delete" data-id="${escapeHtml(appointment.id)}">Delete history</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderArchivedAppointmentDetailModal() {
+  if (!state.adminArchivedAppointmentId) return "";
+  const appointment = (state.data.archivedAppointments || []).find((item) => item.id === state.adminArchivedAppointmentId);
+  if (!appointment) return "";
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const archivedBy = appointment.archivedBy ? userName(appointment.archivedBy) : "Not recorded";
+  const createdBy = appointment.createdBy ? userName(appointment.createdBy) : "Not recorded";
+  const canDeleteHistory = state.data.currentUser?.role === "admin";
+
+  return `
+    <div class="appointment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="archived-appointment-title">
+      <article class="appointment-modal archived-history-modal">
+        <header class="appointment-modal-header">
+          <div>
+            <h3 id="archived-appointment-title">Archived appointment history</h3>
+            <p>${escapeHtml(client.name || clientName(appointment.clientId))}</p>
+            <strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</strong>
+          </div>
+          <button type="button" class="appointment-modal-close" data-action="archived-appointment-close" aria-label="Close archived appointment history">&times;</button>
+        </header>
+        <div class="appointment-modal-body single-column">
+          <div class="detail-list">
+            <div><strong>Appointment</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
+            <div><strong>Type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Not recorded")}</div>
+            <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+            <div><strong>Archived by</strong>${escapeHtml(archivedBy)}</div>
+            <div><strong>Archived on</strong>${appointment.archivedAt ? formatDateTime(appointment.archivedAt) : "Not recorded"}</div>
+            <div><strong>Booked by</strong>${escapeHtml(createdBy)}</div>
+            <div><strong>Phone</strong>${escapeHtml(appointmentContactNumber(appointment) || client.phone || "No mobile recorded")}</div>
+            <div><strong>Address</strong>${escapeHtml(appointment.address || client.address || "No address recorded")}</div>
+          </div>
+          ${canDeleteHistory ? `
+            <div class="form-actions">
+              <button type="button" class="danger" data-action="archived-appointment-delete" data-id="${escapeHtml(appointment.id)}">Delete this history</button>
+              <button type="button" class="secondary" data-action="archived-appointment-close">Close</button>
+            </div>
+          ` : ""}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderSchedule(showAll) {
+  const appointments = sortAppointments(filterItems(state.data.appointments));
+  const grouped = groupByDay(appointments);
+  const scheduleList = `
+    <section class="section">
+      <div class="section-heading"><h3>${showAll ? "Mobile schedule" : "My schedule"}</h3><span>${appointments.length} bookings</span></div>
+      <div class="grid">
+        ${Object.entries(grouped).map(([day, items]) => `
+          <div class="section">
+            <div class="section-heading"><h3>${escapeHtml(day)}</h3><span>${items.length} visits</span></div>
+            <div class="grid cards-3">${items.map(renderAppointmentCard).join("")}</div>
+          </div>
+        `).join("") || emptyState("No bookings found.")}
+      </div>
+    </section>
+  `;
+
+  if (showAll && state.data.currentUser.role === "admin") {
+    return `
+      <div class="two-col">
+        ${renderReceptionBookingForm()}
+        ${scheduleList}
+      </div>
+    `;
+  }
+
+  return scheduleList;
+}
+
+function renderReceptionBookingForm() {
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Book new patient</h3><span>Reception</span></div>
+      <form class="card form-grid" id="reception-booking-form">
+        <input type="hidden" name="actorId" value="${state.data.currentUser.id}">
+        ${input("fullName", "Full name", "text", true)}
+        ${input("contactNumber", "Contact number", "tel", true)}
+        ${input("address", "Address", "text", true, "full")}
+        ${select("contractorId", "Practitioner", state.data.contractors.map((contractor) => [contractor.id, `${contractor.name} - ${contractor.discipline}`]))}
+        ${select("appointmentType", "Appointment type", receptionAppointmentTypes())}
+        ${input("startsAtLocal", "Appointment time", "datetime-local", true)}
+        <label>
+          Duration
+          <input name="durationMinutes" type="number" min="15" step="15" value="60">
+        </label>
+        ${textarea("reasonForReferral", "Reason for referral", "full")}
+        <div class="form-actions full">
+          <button type="submit">Book patient</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderContractorToday() {
+  const practitioner = currentCalendarPractitioner();
+  if (!practitioner) return emptyState("No practitioner is available yet. Sync or create a practitioner first.");
+  const visibleAppointments = sortAppointments(filterItems(appointmentsForPractitioner(state.data.appointments, practitioner.id)));
+  const todayAppointments = sortAppointments(appointmentsForDay(visibleAppointments, new Date()));
+
+  return `
+    ${renderPractitionerCalendar(visibleAppointments)}
+    <section class="section today-appointments-section">
+      <div class="section-heading"><h3>Today's appointments</h3><span>${todayAppointments.length} visits</span></div>
+      <div class="today-appointments-grid">
+        ${todayAppointments.map(renderAppointmentCard).join("") || emptyState("No visits today.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderContractorUpdates() {
+  const notifications = sortNotifications(filterItems(notificationsForPractitionerWorkspace()));
+  const unread = notifications.filter((item) => !item.read).length;
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Updates mailbox</h3><span>${unread} unread</span></div>
+      <div class="mailbox-list">
+        ${notifications.map(renderUpdateMailboxCard).join("") || emptyState("No updates from admin yet.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderContractorMessages() {
+  const admin = adminUser();
+  const thread = admin ? messagesForThread(admin.id) : [];
+  const unreadCount = unreadDirectMessages().length;
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Messages</h3><span>${unreadCount ? `${unreadCount} unread` : "Admin chat"}</span></div>
+      ${renderMessageInboxAlert(unreadCount)}
+      ${admin ? `
+        <div class="chat-panel chat-panel-full">
+          ${renderMessageList(thread)}
+          ${renderMessageForm(admin.id, "Send message to admin")}
+        </div>
+      ` : emptyState("No admin user is available for messaging.")}
+    </section>
+  `;
+}
+
+function renderMessageInboxAlert(unreadCount) {
+  if (!unreadCount) return "";
+  return `
+    <section class="message-inbox-alert" aria-live="polite">
+      <strong>${unreadCount} incoming message${unreadCount === 1 ? "" : "s"}</strong>
+      <span>Open the highlighted conversation to read and reply.</span>
+    </section>
+  `;
+}
+
+function renderUpdateMailboxCard(item) {
+  const isUnread = !item.read;
+  return `
+    <article
+      class="card compact update-card mailbox-card ${item.read ? "muted-card is-read" : "is-unread"}"
+      ${isUnread ? `role="button" tabindex="0" data-action="notification-read" data-id="${escapeHtml(item.id)}" aria-label="Mark update as read"` : ""}
+    >
+      <div class="section-heading">
+        <h4>${escapeHtml(notificationTypeLabel(item.type))}</h4>
+        ${statusPill(item.read ? "read" : "unread", item.read ? "" : "blue")}
+      </div>
+      <div class="detail-list compact">
+        <div><strong>From</strong>Admin</div>
+        <div><strong>Received</strong>${formatDateTime(item.createdAt)}</div>
+        <div><strong>Message</strong>${escapeHtml(item.message || "No message supplied.")}</div>
+      </div>
+      ${isUnread ? `<div class="mini-actions"><button type="button" class="secondary">Mark as read</button></div>` : ""}
+    </article>
+  `;
+}
+
+function renderMessageList(messages) {
+  return `
+    <div class="chat-messages" aria-label="Message thread">
+      ${messages.map((message) => `
+        <article class="chat-message ${message.fromUserId === state.data.currentUser.id ? "from-me" : "from-them"}">
+          <div>
+            <strong>${escapeHtml(userName(message.fromUserId))}</strong>
+            <span>${formatDateTime(message.createdAt)}</span>
+          </div>
+          <p>${escapeHtml(message.body)}</p>
+        </article>
+      `).join("") || emptyState("No messages yet.")}
+    </div>
+  `;
+}
+
+function renderMessageForm(toUserId, buttonText) {
+  return `
+    <form class="chat-compose" id="message-form">
+      <input type="hidden" name="fromUserId" value="${escapeHtml(state.data.currentUser.id)}">
+      <input type="hidden" name="toUserId" value="${escapeHtml(toUserId)}">
+      <textarea name="body" placeholder="Type a message..." required></textarea>
+      <button type="submit">${escapeHtml(buttonText)}</button>
+    </form>
+  `;
+}
+
+function renderPractitionerCalendar(appointments) {
+  const practitioner = currentCalendarPractitioner();
+  if (!practitioner) return emptyState("No practitioner is selected.");
+  const days = calendarDays(state.calendarMode);
+  const slots = calendarSlots(appointments, days);
+  const visibleAppointments = appointments.filter((appointment) =>
+    appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
+  );
+  const visibleUnavailableBlocks = unavailableBlocksForDays(days);
+
+  return `
+    <section class="scheduler-shell">
+      ${renderSchedulerToolbar("Calendar")}
+      <div class="scheduler-body">
+        ${renderSchedulerSidebar()}
+        <div class="calendar-scroll scheduler-calendar">
+          <div class="calendar-grid" style="--calendar-days: ${days.length}">
+            ${renderCalendarHeader(days)}
+            ${slots.map((slot) => `
+              <div class="${calendarTimeClass(slot)}">${formatCalendarTimeAxisLabel(slot)}</div>
+              ${days.map((day) => {
+                const slotAppointments = visibleAppointments.filter((appointment) =>
+                  brisbaneDateKey(appointment.startsAt) === day.key
+                  && appointmentSlotMinutes(appointment) === slot
+                );
+                const slotUnavailableBlocks = visibleUnavailableBlocks.filter((block) =>
+                  unavailableBlockDayKey(block) === day.key
+                  && unavailableBlockStartSlot(block) === slot
+                );
+                const unavailableHere = slotHasUnavailableConflict(day.key, slot, 15);
+                return `
+                  <div class="${calendarCellClass(slot)}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+                    ${slotAppointments.length
+                      ? slotAppointments.map(renderCalendarEvent).join("")
+                      : slotUnavailableBlocks.length
+                      ? slotUnavailableBlocks.map(renderUnavailableBlock).join("")
+                      : unavailableHere
+                      ? `<span class="calendar-unavailable-fill" aria-hidden="true"></span>`
+                      : renderCalendarEmptySlot(day, slot)}
+                  </div>
+                `;
+              }).join("")}
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderUnavailableBlock(block) {
+  return `
+    <button
+      type="button"
+      class="calendar-unavailable-block"
+      data-block-kind="${escapeHtml(block.kind || "unavailable")}"
+      style="--slot-span: ${unavailableBlockSlotSpan(block)}"
+      draggable="true"
+      data-action="open-unavailable-block"
+      data-calendar-item-type="unavailable"
+      data-id="${escapeHtml(block.id)}"
+      title="${escapeHtml(blockKindLabel(block.kind))} ${formatSelectedSlot(block.startsAtLocal)}"
+    >
+      <strong>${escapeHtml(blockKindLabel(block.kind))}</strong>
+      <span>${formatLocalTime(block.startsAtLocal)}-${formatLocalTime(block.endsAtLocal)}</span>
+      ${block.note ? `<em>${escapeHtml(block.note)}</em>` : ""}
+      <span class="calendar-resize-handle" data-resize-type="unavailable" data-resize-id="${escapeHtml(block.id)}" aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function renderCalendarEmptySlot(day, slot) {
+  const startLocal = localDateTimeFromDaySlot(day.key, slot);
+  return `
+    <button
+      type="button"
+      class="calendar-empty-slot"
+      data-action="calendar-booking"
+      data-start-local="${escapeHtml(startLocal)}"
+      aria-label="Create appointment at ${formatSlotTime(slot)} on ${escapeHtml(day.heading)}"
+    ></button>
+  `;
+}
+
+function renderClients() {
+  const clients = filterItems(clientsForPractitionerWorkspace(state.data.clients));
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Client records</h3><span>${clients.length} assigned</span></div>
+      <div class="client-record-list">
+        ${clients.map(renderClientCard).join("") || emptyState("No assigned clients found.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRebook() {
+  const data = state.data;
+  const practitioner = currentCalendarPractitioner();
+  if (!practitioner) return emptyState("No practitioner is available yet. Sync or create a practitioner first.");
+  const clients = filterItems(clientsForPractitionerWorkspace(data.clients));
+  const rebookWorklist = clients.filter(clientNeedsRebook);
+  const selectedRebookClient = data.clients.find((client) => client.id === state.rebookClientId);
+  const selectedStatusClient = data.clients.find((client) => client.id === state.rebookStatusClientId);
+
+  if (selectedStatusClient) {
+    return `
+      <section class="section">
+        <div class="section-heading"><h3>Status update</h3><span>Send to reception</span></div>
+        <form class="card form-grid" id="rebook-status-form">
+          <input type="hidden" name="contractorId" value="${escapeHtml(practitioner.id)}">
+          <input type="hidden" name="clientId" value="${selectedStatusClient.id}">
+          <div class="full detail-list">
+            <div><strong>Patient</strong>${escapeHtml(selectedStatusClient.name)}</div>
+            <div><strong>Address</strong>${escapeHtml(selectedStatusClient.address || "")}</div>
+          </div>
+          ${textarea("reason", "Why they do not need to be rebooked", "full")}
+          <div class="form-actions full">
+            <button type="submit">Send to reception</button>
+            <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
+          </div>
+        </form>
+      </section>
+    `;
+  }
+
+  if (selectedRebookClient) {
+    return `
+      <section class="section rebook-focus-section">
+        <div class="rebook-calendar-stage">
+          ${renderRebookSlotCalendar(selectedRebookClient)}
+          <div class="rebook-booking-popover" role="dialog" aria-label="Create rebooking">
+            ${renderRebookAppointmentForm(data, selectedRebookClient)}
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Patients without upcoming appointments</h3><span>${rebookWorklist.length} to review</span></div>
+      <div class="grid cards-3">
+        ${rebookWorklist.map((client) => `
+          <article class="card compact">
+            <h4>${patientNameButton(client.id, client.name)}</h4>
+            <div class="detail-list">
+              <div><strong>Address</strong>${escapeHtml(client.address || "No address recorded")}</div>
+              <div><strong>Funding</strong>${escapeHtml(client.fundingType || "Not recorded")}</div>
+            </div>
+            <div class="actions">
+              <button data-action="rebook-client" data-client-id="${client.id}">Rebook</button>
+              <button class="secondary" data-action="rebook-status" data-client-id="${client.id}">Status</button>
+            </div>
+          </article>
+        `).join("") || emptyState("No assigned patients need rebooking right now.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRebookAppointmentForm(data, selectedRebookClient) {
+  const practitioner = currentCalendarPractitioner();
+  if (!practitioner) return emptyState("No practitioner is selected.");
+  const startLocal = defaultRebookStart(selectedRebookClient.id);
+  const durationMinutes = defaultRebookDurationMinutes();
+  const endLocal = addMinutesToLocalDateTime(startLocal, durationMinutes);
+  const startTime = timeSelectParts(startLocal);
+  const endTime = timeSelectParts(endLocal);
+  const isPast = localDateTimeIsPast(startLocal);
+  const syncWarning = calendarBookingSyncWarning(practitioner);
+
+  return `
+    <form class="new-appointment-panel rebook-appointment-panel" id="rebook-form">
+      <header class="new-appointment-header">
+        <h3>New appointment</h3>
+      </header>
+      <div class="new-appointment-fields">
+        <input type="hidden" name="actorId" value="${escapeHtml(data.currentUser.id)}">
+        <input type="hidden" name="contractorId" value="${escapeHtml(practitioner.id)}">
+        <input type="hidden" name="clientId" value="${escapeHtml(selectedRebookClient.id)}">
+        <input type="hidden" name="address" value="${escapeHtml(selectedRebookClient.address || "")}">
+        <input type="hidden" name="rebookedFromAppointmentId" value="${escapeHtml(state.rebookFromAppointmentId)}">
+        <input type="hidden" name="durationMinutes" value="${durationMinutes}">
+
+        <div class="new-appointment-row">
+          <span>Practitioner</span>
+          <div class="new-appointment-control static-control">${escapeHtml(practitioner.name)}</div>
+        </div>
+
+        <div class="new-appointment-row">
+          <span>Type</span>
+          <select name="appointmentType">
+            ${bookingTypeOptions(practitioner.discipline).map((type, index) => `<option value="${escapeHtml(type)}" ${index === 0 ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="new-appointment-row">
+          <span>Patient</span>
+          <div class="patient-chip">${escapeHtml(selectedRebookClient.name)} <button type="button" data-action="cancel-rebook" aria-label="Change patient">x</button></div>
+        </div>
+
+        <div class="new-appointment-row">
+          <span></span>
+          <div class="address-box">
+            ${clientAddressLines(selectedRebookClient).map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+          </div>
+        </div>
+
+        <div class="new-appointment-row">
+          <span>Date</span>
+          <input name="bookingDate" type="date" value="${escapeHtml(startLocal.split("T")[0])}" required>
+        </div>
+
+        <div class="new-appointment-row">
+          <span>Time</span>
+          <div class="time-selects">
+            ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+            ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+            ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+            <span>to</span>
+            ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+            ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+            ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+          </div>
+        </div>
+
+        ${isPast ? `
+          <div class="new-appointment-row">
+            <span></span>
+            <div class="time-warning">The selected appointment time is in the past.</div>
+          </div>
+        ` : ""}
+
+        <div class="new-appointment-row">
+          <span>Repeat</span>
+          <select name="recurrence">
+            ${["None", "Weekly", "Fortnightly", "Monthly"].map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="new-appointment-row">
+          <span>Note</span>
+          <textarea name="rebookReason"></textarea>
+        </div>
+
+        <div class="new-appointment-row">
+          <span></span>
+          <button type="button" class="text-link" data-action="add-wait-list">Add to wait list</button>
+        </div>
+
+        <div class="new-appointment-row new-appointment-actions">
+          <span></span>
+          <div>
+            <button type="submit">Create appointment</button>
+            <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  `;
+}
+
+function renderRebookSlotCalendar(client) {
+  const appointments = sortAppointments(appointmentsForPractitioner(state.data.appointments));
+  const days = calendarDays(state.calendarMode);
+  const slots = calendarSlots(appointments, days);
+  const visibleAppointments = appointments.filter((appointment) =>
+    appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
+  );
+
+  return `
+    <section class="scheduler-shell rebook-slot-section">
+      ${renderSchedulerToolbar("Choose a gap", true)}
+      <div class="scheduler-body compact">
+        ${renderSchedulerSidebar()}
+        <div class="calendar-scroll scheduler-calendar">
+          <div class="calendar-grid" style="--calendar-days: ${days.length}">
+            ${renderCalendarHeader(days)}
+            ${slots.map((slot) => `
+              <div class="${calendarTimeClass(slot)}">${formatCalendarTimeAxisLabel(slot)}</div>
+              ${days.map((day) => renderRebookSlotCell(day, slot, visibleAppointments, client)).join("")}
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderRebookSlotCell(day, slot, appointments, client) {
+  const cellClass = calendarCellClass(slot);
+  const slotAppointments = appointments.filter((appointment) =>
+    brisbaneDateKey(appointment.startsAt) === day.key
+    && appointmentSlotMinutes(appointment) === slot
+  );
+  const busy = slotHasConflict(day.key, slot, 60, appointments) || slotHasUnavailableConflict(day.key, slot, 60);
+  const slotUnavailableBlocks = unavailableBlocksForDays([day]).filter((block) =>
+    unavailableBlockDayKey(block) === day.key
+    && unavailableBlockStartSlot(block) === slot
+  );
+
+  if (slotAppointments.length) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">${slotAppointments.map(renderCalendarEvent).join("")}</div>`;
+  }
+
+  if (slotUnavailableBlocks.length) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">${slotUnavailableBlocks.map(renderUnavailableBlock).join("")}</div>`;
+  }
+
+  if (slotHasUnavailableConflict(day.key, slot, 15)) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-unavailable-fill" aria-hidden="true"></span></div>`;
+  }
+
+  if (slotIsPast(day.key, slot)) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy">Past</span></div>`;
+  }
+
+  if (busy) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy">Busy</span></div>`;
+  }
+
+  const startLocal = localDateTimeFromDaySlot(day.key, slot);
+  return `
+    <div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+      <button
+        type="button"
+        class="calendar-gap"
+        data-action="select-rebook-slot"
+        data-start-local="${startLocal}"
+        aria-label="Book ${escapeHtml(client.name)} at ${formatSlotTime(slot)} on ${escapeHtml(day.label)}"
+      >
+        Available
+      </button>
+    </div>
+  `;
+}
+
+function renderSchedulerToolbar(title, buttonType = false) {
+  const typeAttr = buttonType ? ' type="button"' : "";
+  const selectedDate = selectedCalendarDateKey();
+  return `
+    <div class="scheduler-toolbar">
+      <select class="scheduler-location" aria-label="Calendar location">
+        <option>Refine Physiotherapy - Mobile</option>
+      </select>
+      <strong>${escapeHtml(title)}</strong>
+      <div class="calendar-date-nav" aria-label="Calendar date">
+        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="-1" aria-label="Previous ${state.calendarMode === "week" ? "week" : "day"}">&lt;</button>
+        <input type="date" value="${escapeHtml(selectedDate)}" data-action="calendar-date-input" aria-label="Choose calendar date">
+        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="1" aria-label="Next ${state.calendarMode === "week" ? "week" : "day"}">&gt;</button>
+      </div>
+      <div class="calendar-toggle" aria-label="Calendar view">
+        <button${typeAttr} class="${state.calendarMode === "day" ? "active" : ""}" data-action="calendar-mode" data-mode="day">Daily</button>
+        <button${typeAttr} class="${state.calendarMode === "week" ? "active" : ""}" data-action="calendar-mode" data-mode="week">Weekly</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSchedulerSidebar() {
+  const practitioner = currentCalendarPractitioner() || state.data.currentUser;
+  return `
+    <aside class="scheduler-sidebar">
+      ${renderMiniMonth(0)}
+      ${renderMiniMonth(1)}
+      <div class="scheduler-panel">
+        <div class="panel-row">
+          <span>Wait list</span>
+          <strong>0</strong>
+        </div>
+      </div>
+      <div class="scheduler-panel">
+        <div class="panel-title">Skip ahead</div>
+        <div class="skip-buttons">
+          <button type="button" data-action="calendar-skip" data-amount="2" data-unit="weeks">2</button>
+          <button type="button" data-action="calendar-skip" data-amount="4" data-unit="weeks">4</button>
+          <button type="button" data-action="calendar-skip" data-amount="6" data-unit="weeks">6</button>
+          <span>weeks</span>
+          <button type="button" data-action="calendar-skip" data-amount="3" data-unit="months">3</button>
+          <button type="button" data-action="calendar-skip" data-amount="6" data-unit="months">6</button>
+          <button type="button" data-action="calendar-skip" data-amount="12" data-unit="months">12</button>
+          <span>months</span>
+        </div>
+      </div>
+      <div class="scheduler-panel">
+        <div class="panel-title">Practitioners</div>
+        ${canUseOwnerWorkspace()
+          ? state.data.contractors.map((contractor) => `
+            <label class="practitioner-check">
+              <input type="radio" name="ownerPractitionerSidebar" data-action="owner-practitioner" value="${escapeHtml(contractor.id)}" ${contractor.id === practitioner.id ? "checked" : ""}>
+              ${escapeHtml(contractor.name)}
+            </label>
+          `).join("")
+          : `<div class="practitioner-check current-only">${escapeHtml(practitioner.name)}</div>`}
+      </div>
+      ${renderAppointmentColourLegend()}
+      <div class="scheduler-panel">
+        <div class="panel-title">Availability</div>
+        <button type="button" class="sidebar-button" data-action="one-off-availability">One-off availability</button>
+        <button type="button" class="sidebar-button" data-action="new-unavailable-block">Unavailable block</button>
+        <button type="button" class="sidebar-button" data-action="new-travel-block">Travel block</button>
+      </div>
+    </aside>
+  `;
+}
+
+function renderAppointmentColourLegend() {
+  return `
+    <div class="scheduler-panel appointment-colour-legend">
+      <div class="panel-title">Appointment colours</div>
+      <div class="legend-row"><span class="legend-swatch is-type-initial-sah"></span><span>Initial Physio SAH</span></div>
+      <div class="legend-row"><span class="legend-swatch is-type-subsequent-sah"></span><span>Subsequent Physio SAH</span></div>
+      <div class="legend-row"><span class="legend-swatch is-type-initial-chsp"></span><span>Initial Physio CHSP</span></div>
+      <div class="legend-row"><span class="legend-swatch is-type-subsequent-chsp"></span><span>Subsequent Physio CHSP</span></div>
+      <div class="legend-row"><span class="legend-swatch is-type-equipment-trial"></span><span>Equipment Trial</span></div>
+    </div>
+  `;
+}
+
+function renderCalendarHeader(days) {
+  const practitioner = currentCalendarPractitioner() || state.data.currentUser;
+  return `
+    <div class="calendar-corner"></div>
+    ${days.map((day) => `
+      <div class="calendar-day-head ${day.isToday ? "today" : ""}">
+        <strong>${escapeHtml(day.heading)}</strong>
+        <span>${escapeHtml(practitioner.name)}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function renderMiniMonth(offset) {
+  const today = brisbaneParts(new Date());
+  const selectedParts = datePartsFromKey(selectedCalendarDateKey());
+  const monthDate = new Date(Date.UTC(selectedParts.year, selectedParts.month - 1 + state.calendarMonthOffset + offset, 1));
+  const month = monthDate.getUTCMonth();
+  const year = monthDate.getUTCFullYear();
+  const firstDay = new Date(Date.UTC(year, month, 1));
+  const startOffset = (firstDay.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const todayKey = dateKeyFromParts(today);
+  const selectedKeys = new Set(calendarDays(state.calendarMode).map((day) => day.key));
+  const cells = [];
+
+  for (let i = 0; i < startOffset; i += 1) cells.push("");
+  for (let day = 1; day <= daysInMonth; day += 1) cells.push(String(day));
+
+  return `
+    <div class="mini-month">
+      <div class="mini-month-title">
+        ${offset === 0
+          ? `<button type="button" data-action="calendar-month-shift" data-direction="-1" aria-label="Previous month">‹</button>`
+          : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
+        <strong>${new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(monthDate)}</strong>
+        ${offset === 1
+          ? `<button type="button" data-action="calendar-month-shift" data-direction="1" aria-label="Next month">›</button>`
+          : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
+      </div>
+      <div class="mini-weekdays">${["M", "T", "W", "T", "F", "S", "S"].map((label) => `<span>${label}</span>`).join("")}</div>
+      <div class="mini-days">
+        ${cells.map((day) => {
+          if (!day) return "<span></span>";
+          const key = day ? dateKeyFromParts({ year, month: month + 1, day: Number(day) }) : "";
+          const className = [
+            key === todayKey ? "today" : "",
+            selectedKeys.has(key) ? "selected" : ""
+          ].filter(Boolean).join(" ");
+          return `<button type="button" class="${className}" data-action="calendar-date" data-date="${escapeHtml(key)}" aria-pressed="${selectedKeys.has(key) ? "true" : "false"}">${escapeHtml(day)}</button>`;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderNotes() {
+  const data = state.data;
+  const appointments = sortAppointmentsNewest(data.appointments.filter((appointment) => appointment.status !== "cancelled"));
+  const noteAppointments = appointments.filter(noteAppointmentIsRelevant);
+  const activeAppointment = noteAppointments.find((appointment) => appointment.id === state.activeAppointmentId)
+    || preferredNoteAppointment(noteAppointments);
+  if (!activeAppointment) {
+    return `
+      <section class="section">
+        <div class="section-heading"><h3>Treatment notes</h3><span>0 notes</span></div>
+        ${emptyState("No appointment available for notes.")}
+      </section>
+    `;
+  }
+
+  const client = data.clients.find((item) => item.id === activeAppointment.clientId) || {};
+  const clientAppointments = sortAppointmentsNewest(noteAppointments.filter((appointment) => appointment.clientId === activeAppointment.clientId));
+  const timelineAppointments = clientAppointments;
+  const completedCount = clientAppointments.filter((appointment) => noteForAppointment(appointment.id)?.status === "signed").length;
+  const search = state.noteSearch.trim().toLowerCase();
+
+  return `
+    <section class="notes-record notes-list-only">
+      <div class="notes-record-header">
+        <div>
+          <h2>Treatment notes</h2>
+          <p>${escapeHtml(client.name || clientName(activeAppointment.clientId))}</p>
+        </div>
+        <div class="notes-record-summary">
+          ${statusPill(`${completedCount} completed`, "blue")}
+          ${statusPill(`${clientAppointments.length} notes`)}
+        </div>
+      </div>
+      <div class="notes-record-layout">
+        <section class="notes-record-main">
+          <div class="notes-filter-row">
+            <span>Search</span>
+            <input id="note-search" type="search" value="${escapeHtml(state.noteSearch)}" aria-label="Filter treatment notes" placeholder="Filter treatment notes by any word or phrase...">
+          </div>
+          <div class="notes-timeline">
+            ${timelineAppointments.map((appointment, index) => renderTreatmentNoteTimelineCard(appointment, activeAppointment, index + 1, search)).join("")}
+          </div>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderTreatmentNoteTimelineCard(appointment, activeAppointment, index, search) {
+  const note = noteForAppointment(appointment.id);
+  const isActive = appointment.id === activeAppointment.id;
+  const haystack = treatmentNoteSearchText(appointment, note);
+  const hidden = search && !haystack.includes(search) && !isActive ? " hidden" : "";
+  const offlineDraft = getOfflineDraft(appointment.id);
+
+  if (isActive && (!note || note.status !== "signed" || offlineDraft)) {
+    return renderTreatmentNoteFormCard(appointment, note, offlineDraft, index, haystack, hidden);
+  }
+
+  return renderTreatmentNoteReadOnlyCard(
+    appointment,
+    note,
+    index,
+    isActive,
+    state.expandedSignedNoteAppointmentId === appointment.id,
+    haystack,
+    hidden
+  );
+}
+
+function renderTreatmentNoteFormCard(appointment, existingNote, offlineDraft, index, haystack, hidden) {
+  const discipline = appointment.serviceType || state.data.currentUser.discipline || "Physiotherapy";
+  const template = state.data.noteTemplates[discipline] || state.data.noteTemplates["Physiotherapy"];
+  const fields = offlineDraft?.fields || existingNote?.fields || {};
+  const isInitialPhysio = isInitialPhysioAssessment(appointment);
+
+  return `
+    <form class="treatment-note-card note-form is-draft" id="note-form" data-note-search="${escapeHtml(haystack)}" data-active-note="true" data-start-ms="${new Date(appointment.startsAt).getTime()}"${hidden}>
+      <input type="hidden" name="id" value="${existingNote?.id || ""}">
+      <input type="hidden" name="appointmentId" value="${appointment.id}">
+      <input type="hidden" name="clientId" value="${appointment.clientId}">
+      <input type="hidden" name="contractorId" value="${appointment.contractorId}">
+      <input type="hidden" name="discipline" value="${escapeHtml(discipline)}">
+      ${renderTreatmentNoteHeader(appointment, existingNote, index, offlineDraft ? "Offline draft" : "Draft")}
+      <div class="mobile-form-actions form-actions">
+        <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
+        <button type="submit" name="mode" value="signed">Sign note</button>
+      </div>
+      <div class="treatment-note-body form-grid">
+        ${offlineDraft ? `<div class="note-inline-alert full">Offline draft saved on this device</div>` : ""}
+        ${renderPreviousTreatmentNoteCopyControl(appointment)}
+        ${isInitialPhysio
+          ? renderInitialPhysioAssessmentFields(appointment, fields)
+          : template.map((field) => textarea(`field_${field}`, labelFromKey(field), "note-field", fields[field] || "")).join("")}
+        ${input("signature", "Digital signature", "text", false, "", existingNote?.signature || state.data.currentUser.name)}
+        <div class="form-actions full">
+          <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
+          <button type="submit" name="mode" value="signed">Sign note</button>
+          <button type="submit" name="mode" value="offline" class="warning">Save offline</button>
+        </div>
+      </div>
+    </form>
+  `;
+}
+
+function renderPreviousTreatmentNoteCopyControl(appointment) {
+  const previousNotes = previousTreatmentNotesForAppointment(appointment);
+  if (!previousNotes.length) return "";
+
+  return `
+    <section class="note-copy-control full">
+      <label>
+        Copy from previous note
+        <select data-previous-note-select>
+          ${previousNotes.map(({ note, appointment: noteAppointment }) => {
+            const noteDate = noteAppointment?.startsAt || note.updatedAt || note.createdAt;
+            return `<option value="${escapeHtml(note.id)}">${escapeHtml(formatDateTime(noteDate))} - ${escapeHtml(treatmentNoteTitle(noteAppointment || appointment))}</option>`;
+          }).join("")}
+        </select>
+      </label>
+      <button type="button" class="secondary" data-action="copy-previous-note">Copy into note</button>
+    </section>
+  `;
+}
+
+function renderTreatmentNoteReadOnlyCard(appointment, note, index, isActive, expanded, haystack, hidden) {
+  const status = note?.status === "signed" ? "Completed" : note?.status === "draft" ? "Draft" : "Not started";
+  const statusClass = note?.status === "signed" ? "is-signed" : note?.status === "draft" ? "is-draft" : "is-empty";
+  const createdAt = note?.createdAt || appointment.startsAt;
+
+  return `
+    <article class="treatment-note-card ${statusClass} ${isActive ? "active" : ""}" data-note-search="${escapeHtml(haystack)}" data-active-note="${isActive ? "true" : "false"}" data-start-ms="${new Date(appointment.startsAt).getTime()}"${hidden}>
+      ${renderTreatmentNoteHeader(appointment, note, index, status)}
+      ${expanded && note ? renderTreatmentNoteReadOnlyFields(appointment, note) : renderTreatmentNoteCompactSummary(appointment, note)}
+      <footer class="treatment-note-footer">
+        <div class="note-card-links">
+          ${note?.status === "signed"
+            ? `<button type="button" class="text-link" data-action="${expanded ? "open-note" : "expand-signed-note"}" data-id="${escapeHtml(appointment.id)}">${expanded ? "Hide note" : "View note"}</button>`
+            : `<button type="button" class="text-link" data-action="open-note" data-id="${escapeHtml(appointment.id)}">Open note</button>`}
+          ${note ? `<button type="button" class="text-link" data-action="print-note">Export PDF</button>` : ""}
+        </div>
+        <div class="note-card-links">
+          ${noteClinikoUploadBadge(note)}
+          <span>Created ${formatDateTime(createdAt)}</span>
+        </div>
+      </footer>
+    </article>
+  `;
+}
+
+function noteClinikoUploadBadge(note) {
+  if (!note || note.status !== "signed") return "";
+  if (note.clinikoUploadStatus === "synced") return statusPill("Cliniko file synced", "blue");
+  if (note.clinikoUploadStatus === "failed") return statusPill("Cliniko file failed", "gold");
+  if (note.clinikoUploadStatus === "pending") return statusPill("Cliniko file pending", "gold");
+  if (state.data?.clinikoConfig?.noteUploadEnabled) return statusPill("Cliniko file ready", "gold");
+  return "";
+}
+
+function renderTreatmentNoteHeader(appointment, note, index, status) {
+  const typeInfo = appointmentTypeColour(appointment);
+
+  return `
+    <header class="treatment-note-header">
+      <div>
+        <h3>${formatDateTime(appointment.startsAt)}</h3>
+        <div class="treatment-note-meta">
+          <span>${escapeHtml(clientName(appointment.clientId))}</span>
+          <span>${escapeHtml(userName(appointment.contractorId))}</span>
+          <span>${escapeHtml(typeInfo?.label || appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment")}</span>
+        </div>
+      </div>
+      ${statusPill(status, note?.status === "signed" ? "blue" : "gold")}
+    </header>
+  `;
+}
+
+function renderTreatmentNoteCompactSummary(appointment, note) {
+  if (!note) {
+    return `
+      <div class="note-compact-summary">
+        <strong>No note started</strong>
+        <span>${formatDateTime(appointment.startsAt)} is ready for treatment notes.</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="note-compact-summary">
+      <strong>${note.status === "signed" ? "Notes completed" : "Draft saved"}</strong>
+      <span>${escapeHtml(noteSummary(note))}</span>
+    </div>
+  `;
+}
+
+function renderTreatmentNoteReadOnlyFields(appointment, note) {
+  const fields = note.fields || {};
+  const keys = displayFieldKeysForNote(appointment, note);
+  const rows = keys
+    .filter((key) => String(fields[key] || "").trim())
+    .map((key) => `
+      <section class="note-readonly-field">
+        <h4>${escapeHtml(labelFromKey(key))}</h4>
+        <p>${escapeHtml(fields[key])}</p>
+      </section>
+    `);
+
+  return `<div class="note-readonly-fields">${rows.join("") || emptyState("No note details entered.")}</div>`;
+}
+
+function displayFieldKeysForNote(appointment, note) {
+  const fields = note?.fields || {};
+  const baseKeys = isInitialPhysioAssessment(appointment)
+    ? [
+      "reasonForReferral",
+      "medicalHistory",
+      "currentHomeSetUp",
+      "subjective",
+      "objectiveObservations",
+      "assessment",
+      "treatment",
+      "recommendations",
+      "plan"
+    ]
+    : (state.data.noteTemplates[note?.discipline || appointment.serviceType] || state.data.noteTemplates["Physiotherapy"] || []);
+  return [
+    ...baseKeys,
+    ...Object.keys(fields).filter((key) => !baseKeys.includes(key) && !key.startsWith("outcome_"))
+  ];
+}
+
+function treatmentNoteTitle(appointment) {
+  if (isInitialPhysioAssessment(appointment)) return "Initial Physiotherapy Assessment";
+  if (isEquipmentTrialReportAppointment(appointment)) return "Equipment Trial";
+  if (isSubsequentPhysioTreatmentNoteAppointment(appointment)) return "Subsequent Consultation";
+  return "Treatment Note";
+}
+
+function treatmentNoteSearchText(appointment, note) {
+  return [
+    clientName(appointment.clientId),
+    userName(appointment.contractorId),
+    appointment.appointmentType,
+    appointment.recurrence,
+    appointment.serviceType,
+    appointment.status,
+    formatDateTime(appointment.startsAt),
+    ...Object.values(note?.fields || {})
+  ].join(" ").toLowerCase();
+}
+
+function messagesForClient(clientId) {
+  const clientNameText = clientName(clientId).toLowerCase();
+  return (state.data.messages || []).filter((message) =>
+    String(message.body || "").toLowerCase().includes(clientNameText)
+  );
+}
+
+function renderNoteContext(appointment, note) {
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const status = note?.status === "signed" ? "completed" : note?.status || "not started";
+  return `
+    <section class="note-context full">
+      <div>
+        <strong>${patientNameButton(appointment.clientId, client.name || clientName(appointment.clientId))}</strong>
+        <span>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment")}</span>
+      </div>
+      <div>
+        <strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</strong>
+        <span>${escapeHtml(appointment.address || client.address || "No address recorded")}</span>
+      </div>
+      <div class="note-context-status">
+        ${statusPill(status, note?.status === "signed" ? "" : "gold")}
+      </div>
+    </section>
+  `;
+}
+
+function renderNoteStatusRow(appointment, activeAppointmentId = state.activeAppointmentId) {
+  const note = noteForAppointment(appointment.id);
+  const isActive = appointment.id === activeAppointmentId;
+
+  return `
+    <article class="note-status-row ${isActive ? "active" : ""}">
+      <div class="note-status-main">
+        <strong>${escapeHtml(clientName(appointment.clientId))}</strong>
+        <span>${formatDateTime(appointment.startsAt)}</span>
+      </div>
+      <div class="note-status-pills">
+        ${statusPill(note?.status === "signed" ? "completed" : note?.status || "not started", note?.status === "signed" ? "" : "gold")}
+        ${statusPill(appointmentStatusLabel(appointment.status), appointmentStatusTone(appointment.status))}
+      </div>
+      <button class="secondary" data-action="open-note" data-id="${appointment.id}">${note?.status === "signed" ? "View" : "Open"}</button>
+    </article>
+  `;
+}
+
+function noteAppointmentIsRelevant(appointment) {
+  return appointmentRequiresTreatmentNote(appointment) || Boolean(noteForAppointment(appointment.id));
+}
+
+function preferredNoteAppointment(appointments) {
+  return appointments.find((appointment) => noteForAppointment(appointment.id)?.status !== "signed")
+    || appointments[0]
+    || null;
+}
+
+function completedNoteAppointments(appointments) {
+  return sortAppointmentsNewest(appointments.filter((appointment) => noteForAppointment(appointment.id)?.status === "signed"));
+}
+
+function nextIncompleteNoteAppointmentId(currentAppointmentId) {
+  const appointments = sortAppointmentsNewest((state.data.appointments || [])
+    .filter((appointment) => appointment.status !== "cancelled" && noteAppointmentIsRelevant(appointment)));
+  return appointments.find((appointment) =>
+    appointment.id !== currentAppointmentId && noteForAppointment(appointment.id)?.status !== "signed"
+  )?.id || currentAppointmentId;
+}
+
+function renderNoteAppointmentPicker(appointments, activeAppointment) {
+  return `
+    <label class="full">
+      Appointment
+      <select id="note-appointment-select">
+        ${appointments.map((appointment) => `<option value="${appointment.id}" ${appointment.id === activeAppointment.id ? "selected" : ""}>${escapeHtml(clientName(appointment.clientId))} - ${formatDateTime(appointment.startsAt)}</option>`).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderCompletedNoteSummary(appointment, note, appointments) {
+  const completedAppointments = completedNoteAppointments(appointments);
+
+  return `
+    <article class="card completed-note-summary">
+      ${renderNoteAppointmentPicker(appointments, appointment)}
+      <div class="completed-note-list full" aria-label="Completed notes">
+        ${completedAppointments.map((item) => `
+          <div class="completed-note-row ${item.id === appointment.id ? "active" : ""}">
+            <strong>${formatDateTime(item.startsAt)}</strong>
+            <span>Notes completed</span>
+            <button type="button" class="secondary" data-action="expand-signed-note" data-id="${escapeHtml(item.id)}">View note</button>
+          </div>
+        `).join("") || `
+          <div class="completed-note-row active">
+            <strong>${formatDateTime(appointment.startsAt)}</strong>
+            <span>Notes completed</span>
+            <button type="button" class="secondary" data-action="expand-signed-note" data-id="${escapeHtml(appointment.id)}">View note</button>
+          </div>
+        `}
+      </div>
+    </article>
+  `;
+}
+
+function renderInitialPhysioAssessmentFields(appointment, fields) {
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const selectedMeasures = selectedOutcomeMeasuresForAppointment(appointment.id, fields);
+  const customMeasures = customOutcomeMeasuresFromFields(fields);
+  const allMeasures = outcomeMeasureRows(selectedMeasures, customMeasures);
+
+  return `
+    <div class="pill blue full">Initial physiotherapy assessment</div>
+    ${textarea("field_reasonForReferral", "Reason for referral", "note-field", fields.reasonForReferral || appointmentReasonForReferral(appointment))}
+    ${textarea("field_medicalHistory", "Medical history", "note-field", fields.medicalHistory || client.diagnosis || "")}
+    ${textarea("field_currentHomeSetUp", "Current home set up", "note-field", fields.currentHomeSetUp || "")}
+    ${textarea("field_subjective", "Subjective", "note-field", fields.subjective || "")}
+    <section class="clinical-block full">
+      <div class="section-heading">
+        <h4>Objective</h4>
+        ${statusPill(`${selectedMeasures.length} selected`, selectedMeasures.length ? "blue" : "gold")}
+      </div>
+      ${textarea("field_objectiveObservations", "Objective observations", "full", fields.objectiveObservations || "")}
+      ${renderOutcomeMeasurePicker(selectedMeasures)}
+      <div id="custom-outcome-wrap" class="${selectedMeasures.includes("other") ? "full" : "full hidden"}">
+        ${textarea("field_customOutcomeMeasures", "Other outcome measures", "full", fields.customOutcomeMeasures || "")}
+      </div>
+      <div id="outcome-measure-table-wrap">
+        ${renderOutcomeMeasureTable(allMeasures, fields)}
+      </div>
+      <div id="normative-values-wrap">
+        ${renderNormativeValues(allMeasures)}
+      </div>
+    </section>
+    ${textarea("field_assessment", "Assessment", "note-field", fields.assessment || "")}
+    ${textarea("field_treatment", "Treatment", "note-field", fields.treatment || "")}
+    ${textarea("field_recommendations", "Recommendations", "note-field", fields.recommendations || "")}
+    ${textarea("field_plan", "Plan", "note-field", fields.plan || "")}
+  `;
+}
+
+function renderOutcomeMeasureTable(measures, fields = {}) {
+  if (!measures.length) return emptyState("No outcome measures selected.");
+
+  return `
+    <div class="table-wrap outcome-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Outcome measure</th>
+            <th>Score / details</th>
+            <th>Normative / reference value</th>
+            <th>Clinical note</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${measures.map((measure) => {
+            const normativeValue = fields[`outcome_${measure.id}_normativeValue`] || measure.reference || "";
+            return `
+              <tr>
+                <td data-label="Outcome measure"><strong>${escapeHtml(measure.label)}</strong></td>
+                <td data-label="Score / details"><textarea name="field_outcome_${measure.id}_details">${escapeHtml(fields[`outcome_${measure.id}_details`] || "")}</textarea></td>
+                <td data-label="Normative / reference value"><textarea name="field_outcome_${measure.id}_normativeValue">${escapeHtml(normativeValue)}</textarea></td>
+                <td data-label="Clinical note"><textarea name="field_outcome_${measure.id}_clinicalNote">${escapeHtml(fields[`outcome_${measure.id}_clinicalNote`] || "")}</textarea></td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderOutcomeMeasurePicker(selectedMeasures = []) {
+  return `
+    <fieldset class="outcome-measure-picker full">
+      <legend>Outcome measures</legend>
+      <div class="outcome-measure-options" id="outcome-measure-options">
+        ${physioOutcomeMeasures.map((measure) => {
+          const checked = selectedMeasures.includes(measure.id);
+          return `
+            <label class="outcome-measure-chip ${checked ? "selected" : ""}">
+              <input type="checkbox" name="field_outcomeMeasures" value="${escapeHtml(measure.id)}" ${checked ? "checked" : ""}>
+              <span>${escapeHtml(measure.label)}</span>
+            </label>
+          `;
+        }).join("")}
+      </div>
+    </fieldset>
+  `;
+}
+
+function renderNormativeValues(measures) {
+  if (!measures.length) return "";
+
+  return `
+    <div class="normative-panel">
+      <h4>Normative values</h4>
+      <div class="grid">
+        ${measures.map((measure) => `<article>
+            <strong>${escapeHtml(measure.label)}</strong>
+            <p>${escapeHtml(measure.reference)}</p>
+          </article>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderReports() {
+  const data = state.data;
+  const selectedAppointment = data.appointments.find((appointment) => appointment.id === state.reportAppointmentId) || null;
+  const selectedTemplate = data.reportTemplates.find((template) => template.type === state.reportType) || data.reportTemplates[0];
+  const reportFields = selectedTemplate.fields.filter((field) => !["Participant Details", "Therapist Signature"].includes(field));
+  const selectedClientId = state.reportClientId || selectedAppointment?.clientId || data.clients[0]?.id || "";
+  const selectedContractorId = state.reportContractorId || selectedAppointment?.contractorId || (data.currentUser.role === "contractor" ? data.currentUser.id : "");
+  const existingReport = selectedAppointment ? exactReportForAppointment(selectedAppointment) : null;
+  const draftKey = reportDraftKey(selectedAppointment?.id || "", state.reportType);
+  const reportFieldsValue = state.reportDraftKey === draftKey
+    ? { ...(existingReport?.fields || {}), ...state.reportDraftFields }
+    : existingReport?.fields || {};
+  const reportSummary = state.reportDraftKey === draftKey ? state.reportDraftSummary : existingReport?.summary || "";
+  const readyForReviewLabel = data.currentUser.role === "contractor" || ownerViewingPractitioner()
+    ? "Sign off for admin review"
+    : "Ready for admin review";
+
+  return `
+    <section class="section report-focus-section">
+      <div class="section-heading"><h3>Current report</h3><span>${data.currentUser.role === "contractor" ? "Sign off sends a copy to admin" : "Draft PDF-ready content"}</span></div>
+      <form class="card form-grid report-mobile-form" id="report-form">
+        <input type="hidden" name="id" value="${existingReport?.id || ""}">
+        <input type="hidden" name="appointmentId" value="${selectedAppointment?.id || ""}">
+        <div class="mobile-form-actions form-actions full">
+          <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
+          <button type="submit" name="mode" value="ready_for_admin">${readyForReviewLabel}</button>
+        </div>
+        ${select("type", "Report type", data.reportTemplates.map((template) => template.type), state.reportType, "full", "report-type-select")}
+        ${select("clientId", "Client", data.clients.map((client) => [client.id, client.name]), selectedClientId)}
+        ${select("contractorId", "Therapist", data.contractors.map((contractor) => [contractor.id, contractor.name]), selectedContractorId)}
+        ${selectedAppointment ? `<div class="pill blue full">Linked to ${escapeHtml(formatAppointmentLabel(selectedAppointment.id))}</div>` : ""}
+        ${textarea("summary", "Summary", "full", reportSummary)}
+        ${isInitialPhysioReport(state.reportType)
+          ? renderInitialPhysioReportFields(selectedAppointment, reportFieldsValue)
+          : isEquipmentTrialReport(state.reportType)
+          ? renderEquipmentTrialReportFields(reportFieldsValue)
+          : reportFields.map((field) => textarea(`field_${fieldKey(field)}`, field, "full", reportFieldsValue[fieldKey(field)] || "")).join("")}
+        ${input("signature", "Digital signature", "text", false, "full", existingReport?.signature || data.currentUser.name)}
+        <div class="form-actions full">
+          <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
+          <button type="submit" name="mode" value="ready_for_admin">${readyForReviewLabel}</button>
+          ${data.currentUser.role === "admin" ? `<button type="submit" name="mode" value="final">Mark final</button>` : ""}
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderInitialPhysioReportFields(appointment, fields = {}) {
+  const client = appointment ? state.data.clients.find((item) => item.id === appointment.clientId) || {} : {};
+  const selectedMeasures = selectedOutcomeMeasuresForAppointment(outcomeMeasureContextKey(), fields);
+  const customMeasures = customOutcomeMeasuresFromFields(fields);
+  const allMeasures = outcomeMeasureRows(selectedMeasures, customMeasures);
+
+  return `
+    <div class="pill blue full">Initial physiotherapy assessment structure</div>
+    ${textarea("field_reasonForReferral", "Reason for referral", "full", fields.reasonForReferral || (appointment ? appointmentReasonForReferral(appointment) : ""))}
+    ${textarea("field_medicalHistory", "Medical history", "full", fields.medicalHistory || client.diagnosis || "")}
+    ${textarea("field_currentHomeSetUp", "Current home set up", "full", fields.currentHomeSetUp || "")}
+    ${textarea("field_subjective", "Subjective", "full", fields.subjective || "")}
+    <section class="clinical-block full">
+      <div class="section-heading">
+        <h4>Objective</h4>
+        ${statusPill(`${selectedMeasures.length} selected`, selectedMeasures.length ? "blue" : "gold")}
+      </div>
+      ${textarea("field_objectiveObservations", "Objective observations", "full", fields.objectiveObservations || "")}
+      ${renderOutcomeMeasurePicker(selectedMeasures)}
+      <div id="custom-outcome-wrap" class="${selectedMeasures.includes("other") ? "full" : "full hidden"}">
+        ${textarea("field_customOutcomeMeasures", "Other outcome measures", "full", fields.customOutcomeMeasures || "")}
+      </div>
+      <div id="outcome-measure-table-wrap">
+        ${renderOutcomeMeasureTable(allMeasures, fields)}
+      </div>
+      <div id="normative-values-wrap">
+        ${renderNormativeValues(allMeasures)}
+      </div>
+    </section>
+    ${textarea("field_assessment", "Assessment", "full", fields.assessment || "")}
+    ${textarea("field_treatment", "Treatment", "full", fields.treatment || "")}
+    ${textarea("field_recommendations", "Recommendations", "full", fields.recommendations || "")}
+    ${renderReportPhotoAttachments(fields)}
+    ${textarea("field_plan", "Plan", "full", fields.plan || "")}
+  `;
+}
+
+function renderReportPhotoAttachments(fields = {}) {
+  const photos = reportPhotoAttachmentsFromFields(fields);
+  const remaining = Math.max(0, REPORT_PHOTO_LIMIT - photos.length);
+  const hiddenValue = escapeHtml(JSON.stringify(photos));
+
+  return `
+    <section class="clinical-block report-photo-block full">
+      <input type="hidden" name="field_photoAttachments" value="${hiddenValue}">
+      <div class="section-heading">
+        <h4>Photos for PDF</h4>
+        ${statusPill(`${photos.length}/${REPORT_PHOTO_LIMIT} added`, photos.length ? "blue" : "gold")}
+      </div>
+      <p class="form-hint">Take photos from the phone camera or upload images. They will be compressed and added to the signed initial report PDF.</p>
+      <label class="photo-upload-control">
+        <span>${remaining ? "Take or upload photos" : "Photo limit reached"}</span>
+        <input type="file" accept="image/*" capture="environment" multiple data-action="report-photo-input" ${remaining ? "" : "disabled"}>
+      </label>
+      ${photos.length
+        ? `<div class="report-photo-grid">
+            ${photos.map((photo, index) => `
+              <article class="report-photo-preview">
+                <div class="report-photo-frame">
+                  <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(`Photo ${index + 1}`)}">
+                  <span class="photo-index-badge">${index + 1}</span>
+                </div>
+                <div>
+                  <strong>${escapeHtml(`Photo ${index + 1}`)}</strong>
+                  <span>${escapeHtml(photo.name || "Camera photo")} · ${escapeHtml(reportPhotoSizeLabel(photo))}</span>
+                </div>
+                <button type="button" class="secondary" data-action="remove-report-photo" data-index="${index}">Remove</button>
+              </article>
+            `).join("")}
+          </div>`
+        : `<div class="empty-inline">No photos attached yet.</div>`}
+    </section>
+  `;
+}
+
+function renderEquipmentTrialReportFields(fields = {}) {
+  const trialCount = equipmentTrialCount(fields);
+  return `
+    <section class="clinical-block equipment-trials full">
+      <div class="section-heading">
+        <h4>Trialled equipment</h4>
+        ${statusPill(`${trialCount} trial${trialCount === 1 ? "" : "s"}`, "blue")}
+      </div>
+      ${Array.from({ length: trialCount }, (_, index) => renderEquipmentTrialBlock(index + 1, fields)).join("")}
+      <div class="form-actions">
+        <button type="button" class="secondary" data-action="add-equipment-trial">Add another equipment trial</button>
+      </div>
+      ${renderEquipmentRecommendations(fields)}
+    </section>
+  `;
+}
+
+function renderEquipmentTrialBlock(trialIndex, fields = {}) {
+  const optionCount = equipmentOptionCount(trialIndex, fields);
+  const title = fields[`equipmentTrial_${trialIndex}_title`] || `Trialled equipment ${trialIndex}`;
+  return `
+    <section class="equipment-trial-block" data-trial-index="${trialIndex}">
+      <div class="section-heading">
+        <h4>${escapeHtml(title)}</h4>
+        ${statusPill(`${optionCount} option${optionCount === 1 ? "" : "s"}`)}
+      </div>
+      ${input(`field_equipmentTrial_${trialIndex}_title`, "Rename trial section", "text", false, "full", title)}
+      <div class="equipment-option-list">
+        ${Array.from({ length: optionCount }, (_, index) => {
+          const optionIndex = index + 1;
+          return `
+            <div class="equipment-model-row">
+              ${input(
+                `field_equipmentTrial_${trialIndex}_option_${optionIndex}_name`,
+                `${optionIndex}. Model`,
+                "text",
+                false,
+                "",
+                fields[`equipmentTrial_${trialIndex}_option_${optionIndex}_name`] || ""
+              )}
+              ${optionCount > 2 ? `<button type="button" class="secondary" data-action="delete-equipment-option" data-trial-index="${trialIndex}" data-option-index="${optionIndex}">Delete</button>` : ""}
+            </div>
+          `;
+        }).join("")}
+      </div>
+      <div class="form-actions">
+        <button type="button" class="secondary" data-action="add-equipment-option" data-trial-index="${trialIndex}">Add equipment option</button>
+      </div>
+      ${input(`field_equipmentTrial_${trialIndex}_chosenModel`, "Chosen equipment model", "text", false, "full", fields[`equipmentTrial_${trialIndex}_chosenModel`] || "")}
+      ${textarea(`field_equipmentTrial_${trialIndex}_chosenReason`, "Why this model was chosen", "full", fields[`equipmentTrial_${trialIndex}_chosenReason`] || "")}
+    </section>
+  `;
+}
+
+function renderEquipmentRecommendations(fields = {}) {
+  return `
+    <section class="equipment-recommendation-block full">
+      <div class="section-heading">
+        <h4>Recommendations</h4>
+        ${statusPill("auto from chosen models", "blue")}
+      </div>
+      <div id="equipment-recommendation-list">
+        ${renderChosenModelRecommendations(fields)}
+      </div>
+      ${textarea("field_equipmentAdditionalRecommendations", "Additional recommendations", "full", fields.equipmentAdditionalRecommendations || "")}
+      ${textarea("field_equipmentPlan", "Plan", "full", fields.equipmentPlan || "")}
+    </section>
+  `;
+}
+
+function renderChosenModelRecommendations(fields = {}) {
+  const chosenModels = chosenEquipmentModels(fields);
+  if (!chosenModels.length) return emptyState("Chosen equipment models will appear here automatically.");
+
+  return `
+    <ul class="recommendation-list">
+      ${chosenModels.map((item) => `<li><strong>${escapeHtml(item.title)}</strong>: ${escapeHtml(item.model)}</li>`).join("")}
+    </ul>
+  `;
+}
+
+function renderNotesDueList() {
+  const dueAppointments = sortAppointments(state.data.appointments.filter((appointment) =>
+    appointmentNotesDue(appointment) && dueBucket(appointment) !== "upcoming"
+  ));
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Notes due</h3><span>${dueAppointments.length} incomplete</span></div>
+      ${renderDueGroups(dueAppointments, renderNotesDueCard, "No notes are due.")}
+    </section>
+  `;
+}
+
+function renderReportsDueList() {
+  const dueAppointments = sortAppointments(state.data.appointments.filter((appointment) =>
+    appointmentReportDue(appointment) && reportDueBucket(appointment) !== "upcoming"
+  ));
+  const completedReports = completedReportsForAdmin(filterItems(state.data.reports || []));
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Reports due</h3><span>${dueAppointments.length} incomplete</span></div>
+      ${renderDueGroups(dueAppointments, renderReportsDueCard, "No reports are due.", reportDueBucket, { today: "Due now" })}
+    </section>
+    <section class="section">
+      <div class="section-heading"><h3>Completed reports</h3><span>${completedReports.length} ready</span></div>
+      <div class="grid cards-3">
+        ${completedReports.map(renderCompletedReportCard).join("") || emptyState("No completed reports yet.")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDueGroups(appointments, cardRenderer, emptyText, bucketFn = dueBucket, labels = {}) {
+  if (!appointments.length) return emptyState(emptyText);
+  const groups = [
+    [labels.overdue || "Overdue", appointments.filter((appointment) => bucketFn(appointment) === "overdue")],
+    [labels.today || "Today", appointments.filter((appointment) => bucketFn(appointment) === "today")],
+    [labels.upcoming || "Upcoming", appointments.filter((appointment) => bucketFn(appointment) === "upcoming")]
+  ].filter(([, items]) => items.length);
+
+  return `<div class="grid">${groups.map(([label, items]) => `
+    <section class="section due-group">
+      <div class="section-heading"><h3>${escapeHtml(label)}</h3><span>${items.length}</span></div>
+      <div class="grid cards-3">${items.map(cardRenderer).join("")}</div>
+    </section>
+  `).join("")}</div>`;
+}
+
+function renderNotesDueCard(appointment) {
+  return `
+    <article class="card">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</h4>
+        ${statusPill(dueBucketLabel(appointment), dueBucket(appointment) === "overdue" ? "coral" : "blue")}
+      </div>
+      <div class="detail-list">
+        <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
+        <div><strong>Appointment type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType)}</div>
+        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
+        ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
+      </div>
+      <div class="actions">
+        <button data-action="open-note" data-id="${appointment.id}">Complete note</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderAdminReportDueCard(appointment) {
+  const report = exactReportForAppointment(appointment);
+  const status = report?.status || "not_started";
+  return `
+    <article class="card overview-item">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</h4>
+        ${statusPill(reportStatusLabel(status), reportTone(status))}
+      </div>
+      <div class="meta-row">
+        ${statusPill(reportTypeForAppointment(appointment), "blue")}
+        ${statusPill(reportDueAgeLabel(appointment), reportDueBucket(appointment) === "overdue" ? "coral" : "gold")}
+      </div>
+      <div class="detail-list compact">
+        <div><strong>Appointment</strong>${formatDateTime(appointment.startsAt)}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+        ${report?.adminCopySentAt ? `<div><strong>Admin copy</strong>Received ${formatDateTime(report.adminCopySentAt)}</div>` : ""}
+      </div>
+      <div class="actions">
+        <button data-action="report-reminder" data-id="${appointment.id}">Remind to finish report</button>
+        ${report ? `
+          <button class="secondary" data-action="open-report" data-id="${report.id}">Open draft</button>
+          <a class="button secondary" href="/api/reports/${report.id}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
+        ` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderAdminNoteDueCard(appointment) {
+  const daysOverdue = noteDaysOverdue(appointment);
+  return `
+    <article class="card overview-item note-due-card ${daysOverdue > 0 ? "is-overdue" : ""}">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</h4>
+        ${statusPill(noteDueAgeLabel(appointment), daysOverdue > 0 ? "coral" : "gold")}
+      </div>
+      <div class="meta-row">
+        ${statusPill(appointment.appointmentType || appointment.recurrence || appointment.serviceType, appointmentTypeColour(appointment)?.pillTone || "blue")}
+      </div>
+      <div class="detail-list compact">
+        <div><strong>Appointment</strong>${formatDateTime(appointment.startsAt)}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+      </div>
+      <div class="actions">
+        <button data-action="open-note" data-id="${appointment.id}">Open note</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderReportsDueCard(appointment) {
+  const report = exactReportForAppointment(appointment);
+  const status = report?.status || "not_started";
+  return `
+    <article class="card">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</h4>
+        ${statusPill(reportStatusLabel(status), reportTone(status))}
+      </div>
+      <div class="meta-row">
+        ${statusPill(reportTypeForAppointment(appointment), "blue")}
+        ${statusPill(reportDueAgeLabel(appointment), reportDueBucket(appointment) === "overdue" ? "coral" : "gold")}
+      </div>
+      <div class="detail-list">
+        <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
+        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
+        ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
+      </div>
+      <div class="actions">
+        ${state.data.currentUser.role === "admin"
+          ? `<button data-action="report-reminder" data-id="${appointment.id}">Remind to finish report</button>
+             ${report
+              ? `<button class="secondary" data-action="open-report" data-id="${report.id}">Open draft</button>
+                 <a class="button secondary" href="/api/reports/${report.id}/pdf" target="_blank" rel="noreferrer">Download PDF</a>`
+              : ""}`
+          : `<button data-action="complete-report" data-id="${appointment.id}">${report ? "Continue report" : "Start report"}</button>`}
+      </div>
+    </article>
+  `;
+}
+
+function renderRequests() {
+  const data = state.data;
+  const clients = clientsForPractitionerWorkspace(data.clients);
+  const practitionerId = currentCalendarPractitionerId();
+  const approvalRequests = ownerViewingPractitioner()
+    ? (data.approvalRequests || []).filter((request) => request.contractorId === practitionerId)
+    : data.approvalRequests;
+  const selectedClient = clients.find((client) => client.id === state.approvalClientId)
+    || clients[0];
+
+  return `
+    <div class="two-col">
+      <section class="section">
+        <div class="section-heading"><h3>Approvals needed</h3><span>Case manager action</span></div>
+        ${selectedClient ? `
+          <form class="card form-grid" id="approval-form">
+            <input type="hidden" name="contractorId" value="${escapeHtml(practitionerId)}">
+            <input type="hidden" name="source" value="case_manager_approval">
+            <input type="hidden" name="type" value="Approvals needed">
+            <input type="hidden" name="adminAction" value="Ask case manager for approval">
+            ${select("clientId", "Client", clients.map((client) => [client.id, client.name]), selectedClient.id, "", "approval-client-select")}
+            ${select("approvalNeedType", "Approval needed for", [
+              "Equipment trial",
+              "Ongoing physio",
+              "Treatment frequency change",
+              "Other case manager approval"
+            ])}
+            ${textarea("details", "Message to admin", "full")}
+            <div class="form-actions full">
+              <button type="submit">Send to admin</button>
+            </div>
+          </form>
+        ` : emptyState("No assigned clients available.")}
+      </section>
+      <section class="section">
+        <div class="section-heading"><h3>Approval history</h3><span>${approvalRequests.length}</span></div>
+        <div class="grid">${sortApprovalRequests(approvalRequests).map(renderApprovalCard).join("") || emptyState("No approval requests yet.")}</div>
+      </section>
+    </div>
+  `;
+}
+
+function renderCliniko() {
+  const data = state.data;
+  const setupReady = Boolean(enabledClinikoLocations().length && enabledClinikoPractitioners().length);
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Cliniko integration</h3><span>${data.clinikoConfig.connected ? "Configured" : "Not connected"}</span></div>
+      <div class="grid cards-3">
+        <article class="card">
+          <h4>Connection</h4>
+          <div class="meta-row">
+            ${statusPill(data.clinikoSync.status.replaceAll("_", " "), data.clinikoConfig.connected ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.appointmentWriteEnabled ? "write enabled" : "read only", data.clinikoConfig.appointmentWriteEnabled ? "coral" : "blue")}
+            ${statusPill(data.clinikoConfig.appointmentCreateEnabled ? "booking sync on" : "booking sync off", data.clinikoConfig.appointmentCreateEnabled ? "coral" : "gold")}
+            ${statusPill(data.clinikoConfig.pollEnabled ? "polling on" : "polling off", data.clinikoConfig.pollEnabled ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.baseUrl.includes("au1") ? "AU region" : "Custom region")}
+            ${statusPill(setupReady ? "setup selected" : "choose setup", setupReady ? "blue" : "gold")}
+          </div>
+          <p>${escapeHtml(data.clinikoSync.message || "Ready to sync when configured.")}</p>
+          <p>Use a Cliniko test API key first. The first sync imports locations and practitioners so you can choose what is active before patient appointments are imported.</p>
+          <div class="actions">
+            <button data-action="sync-cliniko">Sync now</button>
+          </div>
+        </article>
+        <article class="card">
+          <h4>Source of truth</h4>
+          <div class="detail-list">
+            <div><strong>Cliniko</strong>Patients, practitioners, appointments, calendars, scheduling</div>
+            <div><strong>This portal</strong>Mobile workflow status, notes, report drafts, approval requests, admin review</div>
+            <div><strong>Webhook status</strong>${data.clinikoConfig.webhooksAvailable ? "Webhook-capable" : "Use safe polling"}</div>
+          </div>
+        </article>
+        <article class="card">
+          <h4>Last sync</h4>
+          <p>${data.clinikoSync.lastSyncAt ? formatDateTime(data.clinikoSync.lastSyncAt) : "No live sync yet."}</p>
+          <p>API keys stay server-side in environment variables only. Appointment write-back, note file upload, and report upload are controlled by environment flags after setup is confirmed.</p>
+          <div class="meta-row">
+            ${data.clinikoConfig.syncStartDate
+              ? statusPill(`from ${data.clinikoConfig.syncStartDate}`, "blue")
+              : statusPill(`${data.clinikoConfig.appointmentSyncPastDays || 14}d past`, "blue")}
+            ${statusPill(`${data.clinikoConfig.appointmentSyncFutureDays || 90}d future`, "blue")}
+            ${statusPill(pollingIntervalLabel(data.clinikoConfig), data.clinikoConfig.pollEnabled ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.noteUploadEnabled ? "note files on" : "note files off", data.clinikoConfig.noteUploadEnabled ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.noteUploadAutoEnabled ? "note auto on" : "note auto off", data.clinikoConfig.noteUploadAutoEnabled ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.reportUploadEnabled ? "report uploads on" : "report uploads off", data.clinikoConfig.reportUploadEnabled ? "blue" : "gold")}
+            ${statusPill(data.clinikoConfig.patientCreateEnabled ? "new patients on" : "new patients off", data.clinikoConfig.patientCreateEnabled ? "blue" : "gold")}
+          </div>
+        </article>
+      </div>
+      <section class="section">
+        <div class="section-heading"><h3>Cliniko locations</h3><span>${enabledClinikoLocations().length || 0} active for testing</span></div>
+        <p class="muted">Cliniko calls locations businesses. This setup stores all locations, but only one is active for testing unless multi-location sync is enabled later.</p>
+        ${renderClinikoLocationsTable()}
+      </section>
+      <section class="section">
+        <div class="section-heading"><h3>Cliniko practitioners</h3><span>${enabledClinikoPractitioners().length || 0} active for testing</span></div>
+        <p class="muted">Choose the practitioner whose Cliniko appointments should appear in this app. Patient details are only pulled for appointments matching the active location and active practitioner.</p>
+        ${renderClinikoPractitionersTable()}
+      </section>
+      <section class="section">
+        <div class="section-heading"><h3>Sync errors</h3><span>${data.syncErrors.length}</span></div>
+        ${data.syncErrors.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Operation</th><th>Record</th><th>Error</th><th>Action</th></tr></thead>
+              <tbody>
+                ${data.syncErrors.map((item) => `<tr><td>${formatDateTime(item.createdAt)}</td><td>${escapeHtml(item.operation)}</td><td>${escapeHtml(item.entityType)} ${escapeHtml(item.entityId)}</td><td>${escapeHtml(item.resolvedAt ? "Resolved" : item.message)}</td><td>${item.resolvedAt ? statusPill("resolved", "blue") : `<button type="button" class="secondary" data-action="sync-error-retry" data-id="${escapeHtml(item.id)}">Retry</button>`}</td></tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : emptyState("No sync errors recorded.")}
+      </section>
+      <section class="section">
+        <div class="section-heading"><h3>Sync log</h3><span>${data.clinikoSyncLogs.length}</span></div>
+        ${data.clinikoSyncLogs.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Status</th><th>Operation</th><th>Message</th></tr></thead>
+              <tbody>
+                ${data.clinikoSyncLogs.map((item) => `<tr><td>${formatDateTime(item.createdAt)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.operation)}</td><td>${escapeHtml(item.message || "")}</td></tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : emptyState("No sync activity yet.")}
+      </section>
+      <section class="section">
+        <div class="section-heading"><h3>Recent activity</h3><span>${data.activityLog.length}</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th></tr></thead>
+            <tbody>
+              ${data.activityLog.map((item) => `<tr><td>${formatDateTime(item.createdAt)}</td><td>${escapeHtml(userName(item.actorId))}</td><td>${escapeHtml(item.action)}</td><td>${escapeHtml(item.entityType)} ${escapeHtml(item.entityId)}</td></tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderUserManagement() {
+  const users = state.data.users || [];
+  return `
+    <section class="section users-admin-view">
+      <div class="section-heading"><h3>User management</h3><span>${users.length} accounts</span></div>
+      <div class="user-management-layout">
+        <form class="card compact form-grid dense-form user-create-card" id="user-create-form">
+          <div class="section-heading full">
+            <h4>Create staff account</h4>
+            <span>Admin setup</span>
+          </div>
+          ${input("name", "Full name", "text", true)}
+          ${input("email", "Email", "email", true)}
+          ${select("role", "Role", [
+            ["admin", "Admin"],
+            ["receptionist", "Receptionist"],
+            ["contractor", "Practitioner / contractor"]
+          ], "contractor")}
+          ${input("discipline", "Discipline", "text", false, "", "Physiotherapy")}
+          ${input("clinikoPractitionerId", "Cliniko practitioner ID", "text")}
+          ${input("password", "Temporary password", "password", true)}
+          <div class="form-actions full">
+            <button type="submit">Create user</button>
+          </div>
+        </form>
+        <section class="section user-directory">
+          <div class="section-heading"><h3>Existing users</h3><span>Roles and access</span></div>
+          <div class="user-list">
+            ${users.map(renderUserManagementCard).join("") || emptyState("No users yet.")}
+          </div>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderUserManagementCard(user) {
+  return `
+    <article class="card compact user-card">
+      <form class="form-grid dense-form user-edit-form" data-user-id="${escapeHtml(user.id)}">
+        <div class="section-heading full">
+          <h4>${escapeHtml(user.name || user.email)}</h4>
+          <div class="meta-row">
+            ${statusPill(user.isOwner ? "Owner" : roleLabel(user.role), user.role === "admin" ? "blue" : user.role === "receptionist" ? "gold" : "")}
+            ${statusPill(user.isActive ? "active" : "inactive", user.isActive ? "blue" : "coral")}
+            ${statusPill(user.hasPassword ? "login ready" : "needs password", user.hasPassword ? "blue" : "gold")}
+          </div>
+        </div>
+        ${input("name", "Name", "text", true, "", user.name || "")}
+        ${input("email", "Email", "email", true, "", user.email || "")}
+        ${select("role", "Role", [
+          ["admin", "Admin"],
+          ["receptionist", "Receptionist"],
+          ["contractor", "Practitioner / contractor"]
+        ], user.role || "contractor")}
+        ${input("discipline", "Discipline", "text", false, "", user.discipline || "")}
+        ${input("clinikoPractitionerId", "Cliniko practitioner ID", "text", false, "", user.clinikoPractitionerId || "")}
+        <label>Access
+          <select name="isActive">
+            <option value="true" ${user.isActive ? "selected" : ""}>Active</option>
+            <option value="false" ${!user.isActive ? "selected" : ""}>Inactive</option>
+          </select>
+        </label>
+        <div class="form-actions full">
+          <button type="submit">Save user</button>
+        </div>
+      </form>
+      <form class="form-grid dense-form password-reset-form" data-user-id="${escapeHtml(user.id)}">
+        ${input("password", "New temporary password", "password", true)}
+        <div class="form-actions">
+          <button type="submit" class="secondary">Reset password</button>
+        </div>
+      </form>
+    </article>
+  `;
+}
+
+function renderReferralCard(referral) {
+  const assigned = state.data.users.find((user) => user.id === referral.assignedContractorId);
+  const caseManager = caseManagerFromReferral(referral);
+  const canEditReferral = state.data.currentUser?.role === "admin";
+  const editing = state.editReferralId === referral.id;
+  return `
+    <article class="card" data-referral-id="${referral.id}">
+      <div class="section-heading">
+        <h4>${escapeHtml(referral.clientName)}</h4>
+        ${statusPill(referral.status, referral.urgency === "High" || referral.urgency === "Urgent" ? "coral" : "")}
+      </div>
+      <div class="meta-row">
+        ${statusPill(referral.serviceTypeRequired, "blue")}
+        ${statusPill(referral.urgency, referral.urgency === "Low" ? "" : "gold")}
+        ${referral.suburb ? statusPill(referral.suburb) : ""}
+      </div>
+      <div class="detail-list">
+        <div><strong>Reason for referral</strong>${escapeHtml(referralReason(referral) || "No reason recorded.")}</div>
+        <div><strong>Risks</strong>${escapeHtml(referral.risks || "No alerts.")}</div>
+        <div><strong>Assigned</strong>${escapeHtml(assigned?.name || "Unassigned")}</div>
+        <div><strong>Case manager</strong>${escapeHtml(caseManager ? caseManagerLabel(caseManager) : referral.caseManager || "Not assigned")}</div>
+      </div>
+      ${canEditReferral ? `
+        ${editing ? renderReferralEditForm(referral) : `
+          <div class="mini-actions">
+            <button type="button" class="secondary" data-action="referral-edit" data-id="${escapeHtml(referral.id)}">Edit referral</button>
+          </div>
+        `}
+      ` : ["receptionist"].includes(state.data.currentUser.role) ? `
+        <div class="form-grid">
+          ${select(`assign_${referral.id}`, "Assign", contractorOptions(true), referral.assignedContractorId, "", "", `data-action="assign-referral" data-id="${referral.id}"`)}
+          ${select(`status_${referral.id}`, "Status", state.data.referralStatuses, referral.status, "", "", `data-action="referral-status" data-id="${referral.id}"`)}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderReferralEditForm(referral) {
+  return `
+    <form class="form-grid dense-form referral-edit-form" data-referral-id="${escapeHtml(referral.id)}">
+      ${input("clientName", "Patient name", "text", true, "", referral.clientName || "")}
+      ${input("phone", "Mobile", "tel", false, "", referral.phone || "")}
+      ${input("email", "Email", "email", false, "", referral.email || "")}
+      ${input("address", "Address", "text", false, "full", referral.address || "")}
+      ${input("suburb", "Suburb", "text", false, "", referral.suburb || "")}
+      ${select("fundingType", "Funding", ["", "Home Care Package", "CHSP", "SAH", "NDIS", "Private", "Other"], referral.fundingType || "")}
+      ${select("urgency", "Urgency", ["Low", "Medium", "High", "Urgent"], referral.urgency || "Medium")}
+      ${select("status", "Status", state.data.referralStatuses, referral.status || "new")}
+      ${select("assignedContractorId", "Assign practitioner", contractorOptions(true), referral.assignedContractorId || "")}
+      ${input("referralSource", "Referral source / company", "text", false, "", referral.referralSource || "")}
+      ${select("caseManagerId", "Case manager", caseManagerOptions(true), caseManagerSelectionValue(referral))}
+      ${textarea("reasonForReferral", "Reason for referral", "full", referralReason(referral))}
+      ${textarea("risks", "Risk alerts", "full", referral.risks || "")}
+      <div class="form-actions full">
+        <button type="submit">Save referral</button>
+        <button type="button" class="secondary" data-action="referral-edit-cancel">Cancel</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderAppointmentCard(appointment) {
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const contractor = state.data.users.find((item) => item.id === appointment.contractorId) || {};
+  const appointmentAddress = appointment.address || client.address || "";
+  const practitionerWorkspace = state.data.currentUser.role === "contractor" || ownerViewingPractitioner();
+  const activePractitionerId = currentCalendarPractitionerId();
+  const canRebook = practitionerWorkspace && appointment.contractorId === activePractitionerId;
+  const canRequestApproval = practitionerWorkspace && appointment.contractorId === activePractitionerId;
+  const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
+  const showReport = appointmentRequiresReport(appointment);
+  const nextAppointment = nextAppointmentForClient(appointment);
+
+  return `
+    <article class="card appointment-card ${appointmentCardTone(appointment)}">
+      <div class="section-heading">
+        <h4>${patientNameButton(appointment.clientId, client.name || "Client")}</h4>
+        ${statusPill(appointmentStatusLabel(appointment.status), appointmentStatusTone(appointment.status))}
+      </div>
+      ${renderAppointmentCompletionPills(appointment)}
+      <div class="detail-list">
+        <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
+        <div><strong>Address</strong>${escapeHtml(appointmentAddress)}</div>
+        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        <div><strong>Appointment type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType)}</div>
+        ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
+        ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
+        <div><strong>Therapist</strong>${escapeHtml(contractor.name || "")}</div>
+        <div><strong>Next appointment</strong>${renderNextAppointmentJump(nextAppointment)}</div>
+      </div>
+      <div class="actions">
+        ${renderDirectionsLink(appointmentAddress)}
+        ${showTreatmentNote ? `<button class="secondary" data-action="open-note" data-id="${appointment.id}">Note</button>` : ""}
+        ${showReport ? `<button class="secondary" data-action="open-appointment-report" data-id="${appointment.id}">Report</button>` : ""}
+        ${canRequestApproval ? `<button class="secondary" data-action="approval-needed" data-id="${appointment.id}" data-client-id="${appointment.clientId}">Approvals needed</button>` : ""}
+        ${canRebook ? `<button data-action="rebook-appointment" data-id="${appointment.id}" data-client-id="${appointment.clientId}">Rebook</button>` : ""}
+        <button class="secondary archive-button" data-action="appointment-archive" data-id="${appointment.id}">Archive</button>
+      </div>
+      <div class="mini-actions">
+        ${appointmentActionStatuses().map((status) => `<button class="${status === appointment.status ? "" : "secondary"}" data-action="appointment-status" data-id="${appointment.id}" data-status="${status}">${escapeHtml(appointmentStatusLabel(status))}</button>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderNextAppointmentJump(appointment, includePractitioner = false) {
+  if (!appointment) return "None booked";
+
+  const label = `${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}${includePractitioner ? ` with ${userName(appointment.contractorId)}` : ""}`;
+  return `
+    <button type="button" class="text-link next-appointment-link" data-action="go-to-next-appointment" data-id="${escapeHtml(appointment.id)}" data-starts-at="${escapeHtml(appointment.startsAt)}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function patientNameButton(clientId, label) {
+  return `
+    <button type="button" class="patient-link" data-action="open-patient-file" data-client-id="${escapeHtml(clientId)}">
+      ${escapeHtml(label || clientName(clientId))}
+    </button>
+  `;
+}
+
+function renderPatientFileModal() {
+  if (!state.patientFileClientId) return "";
+
+  const client = state.data.clients.find((item) => item.id === state.patientFileClientId);
+  if (!client) return "";
+
+  const appointments = patientAppointments(client.id);
+  const upcoming = appointments
+    .filter((appointment) => !patientAppointmentIsPrevious(appointment))
+    .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+  const previous = appointments
+    .filter(patientAppointmentIsPrevious)
+    .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
+  const completedNotes = patientCompletedNotes(client.id);
+  const completedReports = patientCompletedReports(client.id);
+  const view = ["details", "appointments", "notes", "reports"].includes(state.patientFileView) ? state.patientFileView : "details";
+
+  return `
+    <div class="appointment-modal-backdrop patient-file-backdrop" role="dialog" aria-modal="true" aria-labelledby="patient-file-title">
+      <article class="appointment-modal patient-file-modal">
+        <header class="appointment-modal-header patient-file-header">
+          <div>
+            <h3 id="patient-file-title">${escapeHtml(client.name || "Patient file")}</h3>
+            <p>Patient file</p>
+            <strong>${patientFileViewLabel(view)}</strong>
+          </div>
+          <button type="button" class="appointment-modal-close" data-action="patient-file-close">Close</button>
+        </header>
+
+        <div class="appointment-modal-body single-column patient-file-body">
+          ${renderPatientFileNav(view, appointments.length, completedNotes.length, completedReports.length)}
+          ${view === "appointments"
+            ? renderPatientFileAppointments(upcoming, previous)
+            : view === "reports"
+            ? renderPatientFileReports(completedReports)
+            : view === "notes"
+            ? renderPatientFileNotes(completedNotes)
+            : renderPatientFileDetails(client, appointments.length, completedNotes.length, completedReports.length)}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function patientFileViewLabel(view) {
+  return {
+    details: "Patient details",
+    appointments: "Appointments",
+    notes: "Notes",
+    reports: "Reports"
+  }[view] || "Patient details";
+}
+
+function renderPatientFileNav(activeView, appointmentCount, noteCount, reportCount) {
+  return `
+    <nav class="patient-file-tabs" aria-label="Patient file sections">
+      <button type="button" class="${activeView === "details" ? "active" : ""}" data-action="patient-file-view" data-view="details">Details</button>
+      <button type="button" class="${activeView === "appointments" ? "active" : ""}" data-action="patient-file-view" data-view="appointments">Appointments <span>${appointmentCount}</span></button>
+      <button type="button" class="${activeView === "notes" ? "active" : ""}" data-action="patient-file-view" data-view="notes">Notes <span>${noteCount}</span></button>
+      <button type="button" class="${activeView === "reports" ? "active" : ""}" data-action="patient-file-view" data-view="reports">Reports <span>${reportCount}</span></button>
+    </nav>
+  `;
+}
+
+function renderPatientFileDetails(client, appointmentCount, noteCount, reportCount) {
+  return `
+    <section class="patient-file-section">
+      <div class="section-heading"><h3>Patient details</h3><span>${escapeHtml(client.fundingType || "No funding type")}</span></div>
+      <div class="detail-list">
+        <div><strong>DOB</strong>${escapeHtml(client.dob || "Not recorded")}</div>
+        <div><strong>Phone</strong>${escapeHtml(client.phone || "Not recorded")}</div>
+        <div><strong>Email</strong>${escapeHtml(client.email || "Not recorded")}</div>
+        <div><strong>Address</strong>${escapeHtml(client.address || "Not recorded")}</div>
+        <div><strong>Emergency contact</strong>${escapeHtml(client.emergencyContact || "Not recorded")}</div>
+        <div><strong>Diagnosis</strong>${escapeHtml(client.diagnosis || "Not recorded")}</div>
+        <div><strong>Goals</strong>${escapeHtml(client.goals || "Not recorded")}</div>
+        <div><strong>Risk alerts</strong>${escapeHtml(client.risks || "No alerts recorded")}</div>
+      </div>
+      <div class="patient-file-section-actions">
+        <button type="button" class="secondary" data-action="patient-file-view" data-view="appointments">View appointments (${appointmentCount})</button>
+        <button type="button" class="secondary" data-action="patient-file-view" data-view="notes">View notes (${noteCount})</button>
+        <button type="button" class="secondary" data-action="patient-file-view" data-view="reports">View reports (${reportCount})</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderPatientFileAppointments(upcoming, previous) {
+  return `
+    <section class="patient-file-section">
+      <div class="section-heading"><h3>Upcoming appointments</h3><span>${upcoming.length}</span></div>
+      ${renderPatientAppointmentList(upcoming, "No upcoming appointments booked.")}
+    </section>
+
+    <section class="patient-file-section">
+      <div class="section-heading"><h3>Previous appointments</h3><span>${previous.length}</span></div>
+      ${renderPatientAppointmentList(previous, "No previous appointments recorded.")}
+    </section>
+  `;
+}
+
+function renderPatientFileNotes(completedWork) {
+  return `
+    <section class="patient-file-section">
+      <div class="section-heading"><h3>Completed notes</h3><span>${completedWork.length}</span></div>
+      ${renderPatientCompletedWorkList(completedWork, "No signed treatment notes yet.")}
+    </section>
+  `;
+}
+
+function renderPatientFileReports(completedReports) {
+  return `
+    <section class="patient-file-section">
+      <div class="section-heading"><h3>Completed reports</h3><span>${completedReports.length}</span></div>
+      ${renderPatientCompletedWorkList(completedReports, "No completed reports yet.")}
+    </section>
+  `;
+}
+
+function renderPatientAppointmentList(appointments, emptyText) {
+  if (!appointments.length) return emptyState(emptyText);
+
+  return `
+    <div class="patient-file-list">
+      ${appointments.map((appointment) => {
+        const note = noteForAppointment(appointment.id);
+        const report = exactReportForAppointment(appointment);
+        const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
+        const showReport = appointmentRequiresReport(appointment);
+        const appointmentAddress = appointment.address || patientClientAddress(appointment.clientId) || "";
+        return `
+          <article class="patient-file-row">
+            <div class="patient-file-row-main">
+              <strong>${renderAppointmentDateJump(appointment)}</strong>
+              <span>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment")}</span>
+            </div>
+            <div class="meta-row">
+              ${statusPill(appointmentStatusLabel(appointment.status), appointmentStatusTone(appointment.status))}
+              ${renderAppointmentCompletionPills(appointment, false)}
+            </div>
+            <div class="detail-list compact">
+              <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+              <div><strong>Address</strong>${escapeHtml(appointmentAddress || "Not recorded")}</div>
+              ${appointmentReasonDetailHtml(appointment)}
+              ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
+            </div>
+            <div class="mini-actions">
+              ${renderDirectionsLink(appointmentAddress)}
+              ${showTreatmentNote ? `<button type="button" class="secondary" data-action="open-note" data-id="${escapeHtml(appointment.id)}">${note?.status === "signed" ? "View note" : note ? "Continue note" : "Start note"}</button>` : ""}
+              ${showReport
+                ? report
+                  ? `<button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(report.id)}">${reportIsCompletedForAdmin(report) ? "View report" : "Continue report"}</button>`
+                  : `<button type="button" class="secondary" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Start report</button>`
+                : ""}
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderAppointmentDateJump(appointment) {
+  return `
+    <button type="button" class="text-link appointment-date-link" data-action="go-to-calendar-appointment" data-id="${escapeHtml(appointment.id)}" data-starts-at="${escapeHtml(appointment.startsAt)}">
+      ${escapeHtml(formatDateTime(appointment.startsAt))} - ${escapeHtml(formatTime(appointment.endsAt))}
+    </button>
+  `;
+}
+
+function renderPatientCompletedWorkList(items, emptyText = "No signed notes or completed reports yet.") {
+  if (!items.length) return emptyState(emptyText);
+
+  return `
+    <div class="patient-file-list">
+      ${items.map((item) => `
+        <article class="patient-file-row">
+          ${renderCompletedWorkRowContent(item)}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderCalendarEvent(appointment) {
+  const readOnly = appointmentIsClinikoReadOnly(appointment);
+  return `
+    <button type="button" class="calendar-event ${appointmentEventTone(appointment)} ${readOnly ? "is-read-only" : ""}" style="--slot-span: ${appointmentSlotSpan(appointment)}" draggable="${readOnly ? "false" : "true"}" data-action="appointment-details" data-calendar-item-type="appointment" data-id="${escapeHtml(appointment.id)}" title="${escapeHtml(clientName(appointment.clientId))}" aria-label="Open appointment details for ${escapeHtml(clientName(appointment.clientId))}">
+      <strong>${appointmentStatusEmoji(appointment)}${appointmentCompletionEmoji(appointment)}${escapeHtml(clientName(appointment.clientId))}</strong>
+      <span>${formatTime(appointment.startsAt)}-${formatTime(appointment.endsAt)}</span>
+      ${renderCalendarCompletionText(appointment)}
+      ${readOnly ? "" : `<span class="calendar-resize-handle" data-resize-type="appointment" data-resize-id="${escapeHtml(appointment.id)}" aria-hidden="true"></span>`}
+    </button>
+  `;
+}
+
+function enabledClinikoLocations() {
+  return (state.data?.clinikoLocations || []).filter((location) => location.enabled);
+}
+
+function enabledClinikoPractitioners() {
+  return (state.data?.clinikoPractitioners || []).filter((practitioner) => practitioner.clinikoSyncEnabled);
+}
+
+function renderClinikoLocationsTable() {
+  const locations = state.data?.clinikoLocations || [];
+  if (!locations.length) {
+    return emptyState("No Cliniko locations imported yet. Add a test API key, then press Sync now.");
+  }
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Active</th><th>Location</th><th>Cliniko ID</th><th>Local ID</th><th>Timezone</th><th>Action</th></tr></thead>
+        <tbody>
+          ${locations.map((location) => `
+            <tr>
+              <td>${statusPill(location.enabled ? "enabled" : "disabled", location.enabled ? "blue" : "gold")}</td>
+              <td><strong>${escapeHtml(location.displayName || location.name)}</strong><br><span>${escapeHtml(location.address || "No address recorded")}</span></td>
+              <td>${escapeHtml(location.clinikoBusinessId)}</td>
+              <td>${escapeHtml(location.id)}</td>
+              <td>${escapeHtml(location.timeZone || "Not set")}</td>
+              <td>
+                <button type="button" class="${location.enabled ? "secondary" : ""}" data-action="cliniko-location-toggle" data-id="${escapeHtml(location.id)}" data-enabled="${location.enabled ? "false" : "true"}">
+                  ${location.enabled ? "Disable" : "Enable for testing"}
+                </button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderClinikoPractitionersTable() {
+  const practitioners = state.data?.clinikoPractitioners || [];
+  if (!practitioners.length) {
+    return emptyState("No Cliniko practitioners imported yet. Add a test API key, then press Sync now.");
+  }
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Active</th><th>Practitioner</th><th>Cliniko ID</th><th>Local ID</th><th>Action</th></tr></thead>
+        <tbody>
+          ${practitioners.map((practitioner) => `
+            <tr>
+              <td>${statusPill(practitioner.clinikoSyncEnabled ? "enabled" : "disabled", practitioner.clinikoSyncEnabled ? "blue" : "gold")}</td>
+              <td><strong>${escapeHtml(practitioner.name || "Unnamed practitioner")}</strong><br><span>${escapeHtml(practitioner.email || "No email recorded")}</span></td>
+              <td>${escapeHtml(practitioner.clinikoPractitionerId)}</td>
+              <td>${escapeHtml(practitioner.id)}</td>
+              <td>
+                <button type="button" class="${practitioner.clinikoSyncEnabled ? "secondary" : ""}" data-action="cliniko-practitioner-toggle" data-id="${escapeHtml(practitioner.id)}" data-enabled="${practitioner.clinikoSyncEnabled ? "false" : "true"}">
+                  ${practitioner.clinikoSyncEnabled ? "Disable" : "Enable for testing"}
+                </button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderAppointmentDetailModal() {
+  if (!state.calendarAppointmentId) return "";
+
+  const appointment = state.data.appointments.find((item) => item.id === state.calendarAppointmentId);
+  if (!appointment) return "";
+
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const nextAppointment = nextAppointmentForClient(appointment);
+  const durationMinutes = appointmentDurationMinutes(appointment);
+  const isRescheduling = state.calendarAppointmentMode === "reschedule";
+  const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
+  const showReport = appointmentRequiresReport(appointment);
+  const readOnly = appointmentIsClinikoReadOnly(appointment);
+  const appointmentAddress = appointment.address || client.address || "";
+  const appointmentEmail = client.email || "";
+  const practitionerWorkspace = state.data.currentUser?.role === "contractor" || ownerViewingPractitioner();
+  const canSendRunningLate = practitionerWorkspace
+    && appointment.contractorId === currentCalendarPractitionerId()
+    && !["cancelled", "archived"].includes(appointment.status);
+  const runningLateMinutes = Number(appointment.runningLateMinutes || 10);
+  const runningLateMinuteOptions = [...new Set([runningLateMinutes, 5, 10, 15, 20, 30, 45, 60])].sort((a, b) => a - b);
+  const lastUpdatedAt = appointment.clinikoUpdatedAt || appointment.updatedAt || appointment.createdAt || "";
+  const runningLateForm = canSendRunningLate ? `
+    <form class="running-late-form" id="running-late-form">
+      <input type="hidden" name="appointmentId" value="${escapeHtml(appointment.id)}">
+      <div class="running-late-header">
+        <div>
+          <span>Late notice</span>
+        </div>
+      </div>
+      <div class="running-late-controls">
+        <label class="running-late-minutes">
+          <span>Min</span>
+          <select name="minutesLate">
+            ${runningLateMinuteOptions.map((minutes) => `
+              <option value="${minutes}" ${minutes === runningLateMinutes ? "selected" : ""}>${minutes}</option>
+            `).join("")}
+          </select>
+        </label>
+        <button type="submit">Send</button>
+      </div>
+    </form>
+  ` : "";
+
+  return `
+    <div class="appointment-modal-backdrop appointment-detail-backdrop" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title">
+      <article class="appointment-modal appointment-detail-modal">
+        <header class="appointment-modal-header">
+          <div>
+            <h3 id="appointment-modal-title">${escapeHtml(appointmentEventCaption(appointment))}</h3>
+            <p>${escapeHtml(userName(appointment.contractorId))}</p>
+            <strong>${formatAppointmentDate(appointment.startsAt)} at ${formatTime(appointment.startsAt)} for ${durationMinutes} minutes</strong>
+          </div>
+          <button type="button" class="appointment-modal-close" data-action="appointment-modal-close" aria-label="Close appointment details">&times;</button>
+        </header>
+
+        ${renderAppointmentClinikoNotePanel(appointment)}
+
+        <div class="appointment-modal-body">
+          <section class="appointment-modal-details">
+            <div class="appointment-modal-name">
+              <h4>${patientNameButton(appointment.clientId, client.name || clientName(appointment.clientId))}</h4>
+              ${appointment.runningLateMinutes ? statusPill(`${appointment.runningLateMinutes} min late notice sent`, "gold") : ""}
+            </div>
+            ${renderAppointmentCompletionPills(appointment)}
+            <div class="appointment-modal-contact">
+              <span>${escapeHtml(appointmentContactNumber(appointment) || "No mobile recorded")}</span>
+              ${appointmentEmail ? `<span>${escapeHtml(appointmentEmail)}</span>` : ""}
+            </div>
+
+            <div class="appointment-modal-list">
+              <div><strong>Next appointment</strong>${renderNextAppointmentJump(nextAppointment, true)}</div>
+              <div><strong>Address</strong>${escapeHtml(appointmentAddress || "No address recorded")}</div>
+            </div>
+
+            ${isRescheduling && !readOnly ? `
+              <form class="appointment-reschedule-form" id="appointment-reschedule-form">
+                <input type="hidden" name="appointmentId" value="${escapeHtml(appointment.id)}">
+                <label>
+                  Appointment time
+                  <input name="startsAtLocal" type="datetime-local" value="${toDateTimeLocalBrisbane(new Date(appointment.startsAt))}" required>
+                </label>
+                <label>
+                  Duration
+                  <input name="durationMinutes" type="number" min="15" step="15" value="${durationMinutes}">
+                </label>
+                <label>
+                  Appointment type
+                  <select name="appointmentType">
+                    ${appointmentTypeOptionsForEdit(appointment).map((type) => `<option value="${escapeHtml(type)}" ${type === (appointment.appointmentType || appointment.recurrence) ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+                  </select>
+                </label>
+                <div class="form-actions full">
+                  <button type="submit">Save changes</button>
+                  <button type="button" class="secondary" data-action="appointment-details" data-id="${escapeHtml(appointment.id)}">Cancel</button>
+                </div>
+              </form>
+            ` : ""}
+
+            ${runningLateForm ? `<div class="appointment-modal-late-slot">${runningLateForm}</div>` : ""}
+          </section>
+
+          <aside class="appointment-modal-actions" aria-label="Appointment actions">
+            <button type="button" class="${appointmentStatusButtonClass(appointment, "completed")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="completed">Arrived</button>
+            <button type="button" class="${appointmentStatusButtonClass(appointment, "no-show")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="no-show">Did not arrive</button>
+            ${readOnly ? "" : `<button type="button" class="secondary" data-action="appointment-reschedule" data-id="${escapeHtml(appointment.id)}">Edit</button>`}
+            ${renderDirectionsLink(appointmentAddress)}
+            <button type="button" class="secondary" data-action="rebook-appointment" data-id="${escapeHtml(appointment.id)}" data-client-id="${escapeHtml(appointment.clientId)}">Rebook</button>
+            ${showTreatmentNote ? `<button type="button" data-action="open-note" data-id="${escapeHtml(appointment.id)}">Notes</button>` : ""}
+            ${showReport ? `<button type="button" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Report</button>` : ""}
+            <button type="button" class="secondary archive-button" data-action="appointment-archive" data-id="${escapeHtml(appointment.id)}">Archive</button>
+          </aside>
+        </div>
+        ${lastUpdatedAt ? `<footer class="appointment-modal-footer">Last updated ${escapeHtml(formatDateTime(lastUpdatedAt))}</footer>` : ""}
+      </article>
+    </div>
+  `;
+}
+
+function renderCalendarBookingModal() {
+  if (!state.calendarBookingStartLocal) return "";
+
+  const clients = state.data.clients || [];
+  const hasExistingPatients = clients.length > 0;
+  const patientMode = hasExistingPatients ? state.calendarBookingPatientMode : "new";
+  const selectedClient = clients.find((client) => client.id === state.calendarBookingClientId) || clients[0] || null;
+  const practitioner = currentCalendarPractitioner();
+  if (!practitioner) return "";
+  const startLocal = state.calendarBookingStartLocal;
+  const durationMinutes = 60;
+  const endLocal = addMinutesToLocalDateTime(startLocal, durationMinutes);
+  const startTime = timeSelectParts(startLocal);
+  const endTime = timeSelectParts(endLocal);
+  const isPast = localDateTimeIsPast(startLocal);
+  const syncWarning = calendarBookingSyncWarning(practitioner);
+
+  return `
+    <div class="appointment-modal-backdrop calendar-booking-backdrop" role="dialog" aria-modal="true" aria-labelledby="calendar-booking-title">
+      <article class="appointment-modal calendar-booking-modal">
+        <form class="new-appointment-panel in-modal" id="calendar-booking-form">
+          <header class="new-appointment-header">
+            <div>
+              <h3 id="calendar-booking-title">New appointment</h3>
+              <p>${formatSelectedSlot(startLocal)}</p>
+            </div>
+            <button type="button" class="appointment-modal-close" data-action="calendar-booking-close" aria-label="Close new appointment">&times;</button>
+          </header>
+
+          <div class="new-appointment-fields">
+            <input type="hidden" name="actorId" value="${escapeHtml(state.data.currentUser.id)}">
+            <input type="hidden" name="contractorId" value="${escapeHtml(practitioner.id)}">
+            <input type="hidden" name="serviceType" value="${escapeHtml(practitioner.discipline)}">
+            <input type="hidden" name="bookingPatientMode" value="${escapeHtml(patientMode)}">
+            ${patientMode === "existing" ? `<input type="hidden" name="address" value="${escapeHtml(selectedClient?.address || "")}">` : ""}
+            <input type="hidden" name="durationMinutes" value="${durationMinutes}">
+
+            <div class="new-appointment-row">
+              <span>Practitioner</span>
+              <div class="new-appointment-control static-control">${escapeHtml(practitioner.name)}</div>
+            </div>
+
+            ${syncWarning ? `
+              <div class="new-appointment-row">
+                <span></span>
+                <div class="time-warning sync-warning">${escapeHtml(syncWarning)}</div>
+              </div>
+            ` : ""}
+
+            <div class="new-appointment-row">
+              <span>Type</span>
+              <select name="appointmentType">
+                ${calendarBookingTypeOptions(practitioner.discipline).map((type, index) => `<option value="${escapeHtml(type)}" ${index === 0 ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+              </select>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Patient</span>
+              <div class="booking-patient-switch">
+                ${hasExistingPatients ? `<button type="button" class="${patientMode === "existing" ? "active" : ""}" data-action="calendar-booking-patient-mode" data-mode="existing">Existing patient</button>` : ""}
+                <button type="button" class="${patientMode === "new" ? "active" : ""}" data-action="calendar-booking-patient-mode" data-mode="new">Create new patient</button>
+              </div>
+            </div>
+
+            ${patientMode === "existing" ? `
+              <div class="new-appointment-row">
+                <span>Existing patient</span>
+                <select name="clientId" data-action="calendar-booking-client">
+                  ${clients.map((client) => `<option value="${escapeHtml(client.id)}" ${client.id === selectedClient?.id ? "selected" : ""}>${escapeHtml(client.name)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="new-appointment-row">
+                <span></span>
+                <div class="address-box">
+                  ${clientAddressLines(selectedClient).map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+                </div>
+              </div>
+            ` : `
+              <div class="new-appointment-row">
+                <span>Full name</span>
+                <input name="fullName" type="text" required>
+              </div>
+
+              <div class="new-appointment-row">
+                <span>Contact</span>
+                <input name="contactNumber" type="tel" required>
+              </div>
+
+              <div class="new-appointment-row">
+                <span>Address</span>
+                <input name="address" type="text" required>
+              </div>
+
+              <div class="new-appointment-row">
+                <span>Email</span>
+                <input name="email" type="email">
+              </div>
+
+              <div class="new-appointment-row">
+                <span>Funding</span>
+                <select name="fundingType">
+                  ${["Home Care Package", "CHSP", "SAH", "NDIS", "Private", "Other"].map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="new-appointment-row">
+                <span>Referral reason</span>
+                <textarea name="reasonForReferral"></textarea>
+              </div>
+            `}
+
+            <div class="new-appointment-row">
+              <span>Date</span>
+              <input name="bookingDate" type="date" value="${escapeHtml(startLocal.split("T")[0])}" required>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Time</span>
+              <div class="time-selects">
+                ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+                ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+                ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+                <span>to</span>
+                ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+                ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+                ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+              </div>
+            </div>
+
+            ${isPast ? `
+              <div class="new-appointment-row">
+                <span></span>
+                <div class="time-warning">The selected appointment time is in the past.</div>
+              </div>
+            ` : ""}
+
+            <div class="new-appointment-row">
+              <span>Repeat</span>
+              <select name="recurrence">
+                ${["None", "Weekly", "Fortnightly", "Monthly"].map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}
+              </select>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Note</span>
+              <textarea name="rebookReason"></textarea>
+            </div>
+
+            <div class="new-appointment-row">
+              <span></span>
+              <button type="button" class="text-link" data-action="add-wait-list">Add to wait list</button>
+            </div>
+
+            <div class="new-appointment-row new-appointment-actions">
+              <span></span>
+              <div>
+                <button type="submit">Create appointment</button>
+                <button type="button" class="secondary" data-action="calendar-booking-close">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </article>
+    </div>
+  `;
+}
+
+function renderUnavailableBlockModal() {
+  const editingBlock = state.unavailableBlocks.find((block) => block.id === state.unavailableBlockId) || null;
+  const startLocal = editingBlock?.startsAtLocal || state.unavailableBlockStartLocal;
+  if (!startLocal) return "";
+
+  const blockKind = editingBlock?.kind || state.unavailableBlockKind || "unavailable";
+  const blockLabel = blockKindLabel(blockKind);
+  const endLocal = editingBlock?.endsAtLocal || addMinutesToLocalDateTime(startLocal, 60);
+  const startTime = timeSelectParts(startLocal);
+  const endTime = timeSelectParts(endLocal);
+
+  return `
+    <div class="appointment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="unavailable-block-title">
+      <article class="appointment-modal calendar-booking-modal">
+        <form class="new-appointment-panel in-modal" id="unavailable-block-form">
+          <header class="new-appointment-header unavailable-header ${blockKind === "travel" ? "travel-header" : ""}">
+            <div>
+              <h3 id="unavailable-block-title">${escapeHtml(blockLabel)} block</h3>
+              <p>${formatSelectedSlot(startLocal)}</p>
+            </div>
+            <button type="button" class="appointment-modal-close" data-action="unavailable-block-close">Close</button>
+          </header>
+
+          <div class="new-appointment-fields">
+            <input type="hidden" name="id" value="${escapeHtml(editingBlock?.id || "")}">
+            <input type="hidden" name="kind" value="${escapeHtml(blockKind)}">
+            <div class="new-appointment-row">
+              <span>Practitioner</span>
+              <div class="new-appointment-control static-control">${escapeHtml(state.data.currentUser.name)}</div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Date</span>
+              <input name="bookingDate" type="date" value="${escapeHtml(startLocal.split("T")[0])}" required>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Time</span>
+              <div class="time-selects">
+                ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+                ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+                ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+                <span>to</span>
+                ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+                ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+                ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+              </div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>${blockKind === "travel" ? "Travel note" : "Reason"}</span>
+              <textarea name="note">${escapeHtml(editingBlock?.note || "")}</textarea>
+            </div>
+
+            <div class="new-appointment-row new-appointment-actions">
+              <span></span>
+              <div>
+                <button type="submit">Save ${escapeHtml(blockLabel.toLowerCase())} block</button>
+                ${editingBlock ? `<button type="button" class="danger" data-action="delete-unavailable-block" data-id="${escapeHtml(editingBlock.id)}">Delete block</button>` : ""}
+                <button type="button" class="secondary" data-action="unavailable-block-close">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </article>
+    </div>
+  `;
+}
+
+function renderReportReminderModal() {
+  if (!state.reportReminderAppointmentId) return "";
+
+  const appointment = state.data.appointments.find((item) => item.id === state.reportReminderAppointmentId);
+  if (!appointment) return "";
+
+  const client = state.data.clients.find((item) => item.id === appointment.clientId) || {};
+  const message = reportReminderDefaultMessage(appointment);
+
+  return `
+    <div class="appointment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="report-reminder-title">
+      <article class="appointment-modal calendar-booking-modal">
+        <form class="new-appointment-panel in-modal" id="report-reminder-form">
+          <header class="new-appointment-header">
+            <div>
+              <h3 id="report-reminder-title">Message practitioner</h3>
+              <p>Report reminder</p>
+            </div>
+            <button type="button" class="appointment-modal-close" data-action="report-reminder-close">Close</button>
+          </header>
+
+          <div class="new-appointment-fields">
+            <input type="hidden" name="actorId" value="${escapeHtml(state.data.currentUser.id)}">
+            <input type="hidden" name="appointmentId" value="${escapeHtml(appointment.id)}">
+            <input type="hidden" name="contractorId" value="${escapeHtml(appointment.contractorId)}">
+            <input type="hidden" name="clientId" value="${escapeHtml(appointment.clientId)}">
+
+            <div class="new-appointment-row">
+              <span>Practitioner</span>
+              <div class="new-appointment-control static-control">${escapeHtml(userName(appointment.contractorId))}</div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Patient</span>
+              <div class="new-appointment-control static-control">${escapeHtml(client.name || clientName(appointment.clientId))}</div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Report</span>
+              <div class="new-appointment-control static-control">${escapeHtml(reportTypeForAppointment(appointment))}</div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Appointment</span>
+              <div class="new-appointment-control static-control">${formatDateTime(appointment.startsAt)}</div>
+            </div>
+
+            <div class="new-appointment-row">
+              <span>Message</span>
+              <textarea name="message" required>${escapeHtml(message)}</textarea>
+            </div>
+
+            <div class="new-appointment-row new-appointment-actions">
+              <span></span>
+              <div>
+                <button type="submit">Send reminder</button>
+                <button type="button" class="secondary" data-action="report-reminder-close">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </article>
+    </div>
+  `;
+}
+
+function renderAppointmentAlert(appointment) {
+  return `<article class="card compact">
+    <h4>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</h4>
+    <div class="meta-row">${statusPill("note incomplete", "gold")}${statusPill(appointment.serviceType, "blue")}</div>
+    <p>${formatDateTime(appointment.startsAt)} with ${escapeHtml(userName(appointment.contractorId))}</p>
+  </article>`;
+}
+
+function renderInboxItemCard(item) {
+  const isClosed = ["resolved", "closed"].includes(item.status);
+  const reportId = item.sourceType === "report_copy" ? item.sourceId : "";
+  const reportActions = reportId ? `
+    <div class="actions">
+      <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
+      <a class="button secondary" href="/api/reports/${escapeHtml(reportId)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
+    </div>
+  ` : "";
+  return `
+    <article class="card compact inbox-card ${item.sourceType === "report_copy" ? "is-report-copy" : ""} ${isClosed ? "muted-card" : ""}">
+      <div class="section-heading">
+        <h4>${escapeHtml(item.title)}</h4>
+        ${statusPill(inboxStatusLabel(item.status), inboxTone(item.status))}
+      </div>
+      <div class="meta-row">
+        ${statusPill(inboxSourceLabel(item.sourceType), "blue")}
+        ${statusPill(item.priority === "high" ? "high priority" : "normal priority", item.priority === "high" ? "coral" : "")}
+      </div>
+      <div class="detail-list">
+        <div><strong>Client</strong>${escapeHtml(clientName(item.clientId))}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(item.contractorId ? userName(item.contractorId) : "Unassigned")}</div>
+        <div><strong>Message</strong>${escapeHtml(item.message || "No message supplied.")}</div>
+        <div><strong>Received</strong>${formatDateTime(item.createdAt)}</div>
+      </div>
+      ${reportActions}
+      <div class="mini-actions">
+        ${["new", "in_progress", "waiting", "resolved"].map((status) => `
+          <button
+            class="${item.status === status ? "" : "secondary"}"
+            data-action="inbox-status"
+            data-id="${item.id}"
+            data-status="${status}"
+          >${escapeHtml(inboxStatusLabel(status))}</button>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderBookedNewPatientCard(referral) {
+  const appointment = bookedAppointmentForReferral(referral);
+  const client = state.data.clients.find((item) => item.id === referral.clientId) || {};
+  return `
+    <article class="card booked-patient-card">
+      <div class="section-heading">
+        <h4>${escapeHtml(referral.clientName || client.name || "Client")}</h4>
+        ${statusPill("booked", "blue")}
+      </div>
+      <div class="meta-row">
+        ${referral.referralSource ? statusPill(referral.referralSource) : ""}
+      </div>
+      <div class="detail-list compact">
+        <div><strong>Appointment</strong>${appointment ? `${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}` : "No appointment found"}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(appointment ? userName(appointment.contractorId) : userName(referral.assignedContractorId))}</div>
+        <div><strong>Contact</strong>${escapeHtml(referral.phone || client.phone || "")}</div>
+        <div><strong>Funding</strong>${escapeHtml(referral.fundingType || client.fundingType || "Not recorded")}</div>
+      </div>
+      ${appointment ? `
+        <div class="actions">
+          ${appointmentRequiresTreatmentNote(appointment)
+            ? `<button data-action="open-note" data-id="${appointment.id}">Open note</button>`
+            : appointmentRequiresReport(appointment)
+            ? `<button data-action="open-appointment-report" data-id="${appointment.id}">Open report</button>`
+            : ""}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderContractorCard(contractor) {
+  const appointments = state.data.appointments.filter((appointment) => appointment.contractorId === contractor.id);
+  const due = appointments.filter((appointment) => !appointment.notesComplete && appointment.status !== "cancelled").length;
+  return `
+    <article class="card">
+      <h4>${escapeHtml(contractor.name)}</h4>
+      <div class="meta-row">
+        ${statusPill(contractor.discipline, "blue")}
+        ${contractor.baseSuburb ? statusPill(contractor.baseSuburb) : ""}
+      </div>
+      <div class="detail-list">
+        <div><strong>Bookings</strong>${appointments.length}</div>
+        <div><strong>Incomplete notes</strong>${due}</div>
+        <div><strong>Cliniko practitioner</strong>${escapeHtml(contractor.clinikoPractitionerId || "Not linked")}</div>
+      </div>
+    </article>
+  `;
+}
+
+function renderClientCard(client) {
+  const appointments = patientAppointments(client.id);
+  const nextAppointment = appointments.find((appointment) => !patientAppointmentIsPrevious(appointment));
+  const referral = state.data.referrals.find((item) => item.clientId === client.id);
+  return `
+    <article class="card client-record-card client-list-row">
+      <div class="client-list-main">
+        <div>
+          <h4>${patientNameButton(client.id, client.name)}</h4>
+          <span>${escapeHtml(client.phone || "No phone recorded")}</span>
+        </div>
+        <div class="meta-row">
+          ${client.fundingType ? statusPill(client.fundingType, "blue") : ""}
+          ${referral ? statusPill(referral.status) : ""}
+        </div>
+      </div>
+      <div class="detail-list compact client-list-details">
+        <div><strong>DOB</strong>${escapeHtml(client.dob || "Not recorded")}</div>
+        <div><strong>Address</strong>${escapeHtml(client.address || "Not recorded")}</div>
+        <div><strong>Next appointment</strong>${nextAppointment ? formatDateTime(nextAppointment.startsAt) : "None booked"}</div>
+        <div><strong>Risk alerts</strong>${escapeHtml(client.risks || "No alerts.")}</div>
+      </div>
+      ${state.data.currentUser.role === "contractor" ? `
+        <div class="actions">
+          <button type="button" class="secondary" data-action="open-patient-file" data-client-id="${escapeHtml(client.id)}">Patient details</button>
+          <button class="secondary" data-action="approval-needed" data-client-id="${client.id}">Approvals needed</button>
+          <button data-action="rebook-client" data-client-id="${client.id}">Rebook</button>
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderClientRecordAppointmentList(appointments) {
+  if (!appointments.length) return emptyState("No appointments recorded.");
+
+  const sorted = [
+    ...appointments.filter((appointment) => !patientAppointmentIsPrevious(appointment)).sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)),
+    ...appointments.filter(patientAppointmentIsPrevious).sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))
+  ];
+
+  return `
+    <div class="client-record-mini-list">
+      ${sorted.map((appointment) => {
+        const note = noteForAppointment(appointment.id);
+        const report = exactReportForAppointment(appointment);
+        const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
+        const showReport = appointmentRequiresReport(appointment);
+        const appointmentAddress = appointment.address || patientClientAddress(appointment.clientId) || "";
+        return `
+          <article class="client-record-row">
+            <div class="client-record-row-main">
+              <strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</strong>
+              <span>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment")}</span>
+            </div>
+            <div class="meta-row">
+              ${statusPill(appointmentStatusLabel(appointment.status), appointmentStatusTone(appointment.status))}
+            </div>
+            <div class="detail-list compact">
+              <div><strong>Practitioner</strong>${escapeHtml(userName(appointment.contractorId))}</div>
+              <div><strong>Address</strong>${escapeHtml(appointmentAddress || "Not recorded")}</div>
+              ${appointmentReasonDetailHtml(appointment)}
+              ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
+            </div>
+            <div class="mini-actions">
+              ${renderDirectionsLink(appointmentAddress)}
+              ${showTreatmentNote ? `<button type="button" class="secondary" data-action="open-note" data-id="${escapeHtml(appointment.id)}">${note?.status === "signed" ? "View note" : note ? "Continue note" : "Start note"}</button>` : ""}
+              ${showReport
+                ? report
+                  ? `<button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(report.id)}">${reportIsCompletedForAdmin(report) ? "View report" : "Continue report"}</button>`
+                  : `<button type="button" class="secondary" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Start report</button>`
+                : ""}
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderClientRecordWorkList(items) {
+  if (!items.length) return emptyState("No completed notes or reports yet.");
+
+  return `
+    <div class="client-record-mini-list">
+      ${items.map((item) => `
+        <article class="client-record-row">
+          ${renderCompletedWorkRowContent(item)}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderCompletedWorkRowContent(item) {
+  if (item.kind === "note") {
+    return `
+      <div class="completed-note-row inline">
+        <strong>${formatDateTime(item.appointmentDate || item.date)}</strong>
+        <span>Notes completed</span>
+        <button type="button" class="secondary" data-action="open-note" data-id="${escapeHtml(item.appointmentId)}">View note</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="client-record-row-main">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span>${formatDateTime(item.date)}</span>
+    </div>
+    <div class="meta-row">${statusPill(item.status, "blue")}</div>
+    <div class="mini-actions">
+      <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(item.id)}">View report</button>
+    </div>
+  `;
+}
+
+function renderReportCard(report) {
+  return `
+    <article class="card">
+      <div class="section-heading">
+        <h4>${escapeHtml(report.type)}</h4>
+        ${statusPill(reportStatusLabel(report.status), reportTone(report.status))}
+      </div>
+      <div class="detail-list">
+        <div><strong>Client</strong>${escapeHtml(clientName(report.clientId))}</div>
+        <div><strong>Therapist</strong>${escapeHtml(userName(report.contractorId))}</div>
+        ${report.appointmentId ? `<div><strong>Appointment</strong>${escapeHtml(formatAppointmentLabel(report.appointmentId))}</div>` : ""}
+        <div><strong>Summary</strong>${escapeHtml(report.summary || "No summary.")}</div>
+        ${report.adminCopySentAt ? `<div><strong>Admin copy</strong>Sent ${formatDateTime(report.adminCopySentAt)}</div>` : ""}
+        ${renderClinikoReportUploadStatus(report)}
+      </div>
+      <div class="actions">
+        <button class="secondary" data-action="open-report" data-id="${report.id}">Open</button>
+        <a class="button secondary" href="/api/reports/${report.id}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
+        ${renderClinikoReportUploadButton(report)}
+      </div>
+    </article>
+  `;
+}
+
+function renderCompletedReportCard(report) {
+  const appointment = state.data.appointments.find((item) => item.id === report.appointmentId);
+  return `
+    <article class="card completed-report-card">
+      <div class="section-heading">
+        <h4>${escapeHtml(report.type || "Completed report")}</h4>
+        ${statusPill(reportStatusLabel(report.status), reportTone(report.status))}
+      </div>
+      <div class="detail-list">
+        <div><strong>Client</strong>${patientNameButton(report.clientId, clientName(report.clientId))}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(userName(report.contractorId))}</div>
+        <div><strong>Received</strong>${formatDateTime(report.adminCopySentAt || report.updatedAt || report.createdAt)}</div>
+        ${appointment ? `<div><strong>Appointment</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>` : ""}
+        <div><strong>Summary</strong>${escapeHtml(report.summary || "Ready for admin review.")}</div>
+        ${renderClinikoReportUploadStatus(report)}
+      </div>
+      <div class="actions">
+        <button data-action="open-report" data-id="${escapeHtml(report.id)}">Open report</button>
+        <a class="button secondary" href="/api/reports/${escapeHtml(report.id)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
+        ${renderClinikoReportUploadButton(report)}
+      </div>
+    </article>
+  `;
+}
+
+function renderClinikoReportUploadStatus(report) {
+  if (!isAdminReportUploadType(report.type)) return "";
+  const enabled = state.data?.clinikoConfig?.reportUploadEnabled;
+  const status = report.clinikoUploadStatus || (enabled ? "not uploaded" : "upload off");
+  const tone = status === "synced" ? "blue" : status === "failed" ? "coral" : "gold";
+  const detail = report.clinikoUploadStatus === "synced"
+    ? `${report.clinikoAttachmentFilename || "Uploaded PDF"}${report.clinikoAttachmentProcessingCompleted ? "" : " (Cliniko processing)"}`
+    : report.clinikoUploadError || (enabled ? "Will upload when signed or by admin retry." : "Enable report upload in environment variables to send PDFs to Cliniko.");
+  return `<div><strong>Cliniko file</strong>${statusPill(status, tone)} <span>${escapeHtml(detail)}</span></div>`;
+}
+
+function renderClinikoReportUploadButton(report) {
+  const enabled = state.data?.clinikoConfig?.reportUploadEnabled;
+  if (!enabled || state.data.currentUser.role !== "admin") return "";
+  if (!isAdminReportUploadType(report.type) || !["ready_for_admin", "final"].includes(report.status)) return "";
+  if (report.clinikoUploadStatus === "synced" && report.clinikoAttachmentId && report.clinikoAttachmentProcessingCompleted) return "";
+  const label = report.clinikoUploadStatus === "synced" && !report.clinikoAttachmentProcessingCompleted ? "Retry upload" : "Upload to Cliniko";
+  return `<button type="button" class="secondary" data-action="upload-report-cliniko" data-id="${escapeHtml(report.id)}">${label}</button>`;
+}
+
+function isAdminReportUploadType(type) {
+  return ["Initial Physiotherapy Assessment Report", "Equipment Trial Report"].includes(type);
+}
+
+function renderApprovalCard(request) {
+  const tone = request.status === "approved" ? "" : request.status === "declined" ? "coral" : "gold";
+  const isAdmin = state.data.currentUser.role === "admin";
+  return `
+    <article class="card compact">
+      <div class="section-heading">
+        <h4>${escapeHtml(request.approvalNeedType || request.type)}</h4>
+        ${statusPill(approvalStatusLabel(request.status), tone)}
+      </div>
+      <div class="detail-list">
+        <div><strong>Client</strong>${escapeHtml(clientName(request.clientId))}</div>
+        <div><strong>Practitioner</strong>${escapeHtml(userName(request.contractorId))}</div>
+        ${request.adminAction ? `<div><strong>Admin action</strong>${escapeHtml(request.adminAction)}</div>` : ""}
+        <div><strong>Details</strong>${escapeHtml(request.details || "No message supplied.")}</div>
+        ${request.resultMessage ? `<div><strong>Result</strong>${escapeHtml(request.resultMessage)}</div>` : ""}
+      </div>
+      ${isAdmin ? `
+        <div class="mini-actions">
+          <button data-action="approval-status" data-id="${request.id}" data-status="waiting" class="${request.status === "waiting" || request.status === "pending" ? "" : "secondary"}">Waiting</button>
+          <button data-action="approval-status" data-id="${request.id}" data-status="approved" class="${request.status === "approved" ? "" : "secondary"}">Approved</button>
+          <button data-action="approval-status" data-id="${request.id}" data-status="declined" class="${request.status === "declined" ? "" : "secondary"}">Declined</button>
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function bindEvents() {
+  document.querySelector("#global-search")?.addEventListener("input", (event) => {
+    state.search = event.target.value;
+    document.querySelector("#view").innerHTML = renderView();
+    bindViewEvents();
+  });
+
+  document.querySelectorAll("[data-action='set-tab']").forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveTab(button.dataset.tab);
+      render();
+      void markApprovalResultsSeenForCurrentTab();
+    });
+  });
+
+  document.querySelector("[data-action='toggle-tab-menu']")?.addEventListener("click", () => {
+    state.tabMenuOpen = !state.tabMenuOpen;
+    render();
+  });
+
+  document.querySelector("[data-action='tab-back']")?.addEventListener("click", () => {
+    goBackToPreviousTab();
+    render();
+    void markApprovalResultsSeenForCurrentTab();
+  });
+
+  document.querySelectorAll("[data-action='tab-step']").forEach((button) => {
+    button.addEventListener("click", () => {
+      scrollTabList(Number(button.dataset.step || 1));
+    });
+  });
+
+  document.querySelectorAll("[data-action='kpi-nav']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.target;
+      if (target === "notes-due") setActiveTab("notesDue");
+      else if (target === "reports-due") setActiveTab("reportsDue");
+      else if (target === "requests") setActiveTab("requests");
+      else if (target === "inbox") setActiveTab("inbox");
+      else if (target === "adminReports") setActiveTab("adminReports");
+      else if (target === "messages") setActiveTab("messages");
+      else setActiveTab("today");
+      render();
+      void markApprovalResultsSeenForCurrentTab();
+    });
+  });
+
+  document.querySelector("[data-action='logout']")?.addEventListener("click", async () => {
+    await fetchJson("/api/auth/logout", { method: "POST", body: {} });
+    state.data = null;
+    state.tab = "";
+    state.search = "";
+    state.loginError = "";
+    state.forgotMessage = "";
+    state.forgotMode = false;
+    state.tabHistory = [];
+    localStorage.removeItem("refine-active-tab");
+    renderLogin();
+  });
+
+  bindViewEvents();
+}
+
+function bindLoginEvents() {
+  document.querySelector("#login-form")?.addEventListener("submit", submitLogin);
+  document.querySelector("#forgot-password-form")?.addEventListener("submit", submitForgotPassword);
+  document.querySelector("[data-action='forgot-password']")?.addEventListener("click", () => {
+    state.forgotMode = true;
+    state.loginError = "";
+    state.forgotMessage = "";
+    renderLogin();
+  });
+  document.querySelector("[data-action='back-to-login']")?.addEventListener("click", () => {
+    state.forgotMode = false;
+    state.loginError = "";
+    state.forgotMessage = "";
+    renderLogin();
+  });
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  state.loginLoading = true;
+  state.loginError = "";
+  state.forgotMessage = "";
+  renderLogin();
+  try {
+    await fetchJson("/api/auth/login", { method: "POST", body: payload });
+    state.loginLoading = false;
+    state.tab = "";
+    state.tabHistory = [];
+    await loadData();
+  } catch (error) {
+    state.loginLoading = false;
+    state.loginError = error.message || "Could not sign in.";
+    renderLogin();
+  }
+}
+
+async function submitForgotPassword(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  state.loginLoading = true;
+  state.loginError = "";
+  state.forgotMessage = "";
+  renderLogin();
+  try {
+    const result = await fetchJson("/api/auth/forgot-password", { method: "POST", body: payload });
+    state.loginLoading = false;
+    state.forgotMessage = result.message || "If the account exists, an admin can reset the password.";
+    renderLogin();
+  } catch (error) {
+    state.loginLoading = false;
+    state.loginError = error.message || "Could not request password reset.";
+    renderLogin();
+  }
+}
+
+function handleViewClick(event) {
+  const appointmentJumpButton = event.target.closest("[data-action='go-to-next-appointment'], [data-action='go-to-calendar-appointment']");
+  if (!appointmentJumpButton) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  goToAppointmentOnCalendar(appointmentJumpButton.dataset.id, appointmentJumpButton.dataset.startsAt);
+}
+
+function goToAppointmentOnCalendar(appointmentId, startsAtFallback = "") {
+  const appointment = state.data.appointments.find((item) => item.id === appointmentId);
+  const startsAt = appointment?.startsAt || startsAtFallback;
+  if (!startsAt) return;
+
+  setCalendarDateKey(brisbaneDateKey(startsAt));
+  setActiveTab("today");
+  state.calendarAppointmentId = appointment?.id || "";
+  state.calendarAppointmentMode = "details";
+  state.patientFileClientId = "";
+  closeCalendarBooking();
+  closeUnavailableBlock();
+  render();
+}
+
+function bindViewEvents() {
+  app.onclick = handleViewClick;
+
+  document.querySelector("#user-create-form")?.addEventListener("submit", submitCreateUser);
+  document.querySelectorAll(".user-edit-form").forEach((form) => {
+    form.addEventListener("submit", submitEditUser);
+  });
+  document.querySelectorAll(".password-reset-form").forEach((form) => {
+    form.addEventListener("submit", submitResetUserPassword);
+  });
+
+  document.querySelectorAll("[data-action='new-unavailable-block']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarAppointmentId = "";
+      closeCalendarBooking();
+      state.unavailableBlockId = "";
+      state.unavailableBlockKind = "unavailable";
+      state.unavailableBlockStartLocal = defaultUnavailableStartLocal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='new-travel-block']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarAppointmentId = "";
+      closeCalendarBooking();
+      state.unavailableBlockId = "";
+      state.unavailableBlockKind = "travel";
+      state.unavailableBlockStartLocal = defaultUnavailableStartLocal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='one-off-availability']").forEach((button) => {
+    button.addEventListener("click", () => {
+      toast("Use empty calendar slots to create one-off appointments");
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-unavailable-block']").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.skipClick === "true") return;
+      state.calendarAppointmentId = "";
+      closeCalendarBooking();
+      state.unavailableBlockId = button.dataset.id;
+      state.unavailableBlockKind = state.unavailableBlocks.find((block) => block.id === button.dataset.id)?.kind || "unavailable";
+      state.unavailableBlockStartLocal = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='calendar-booking']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarAppointmentId = "";
+      state.calendarAppointmentMode = "details";
+      closeUnavailableBlock();
+      state.calendarBookingStartLocal = button.dataset.startLocal;
+      state.calendarBookingClientId ||= state.data.clients[0]?.id || "";
+      state.calendarBookingPatientMode = state.data.clients.length ? "existing" : "new";
+      render();
+      focusCalendarBookingField();
+    });
+  });
+
+  document.querySelectorAll("[data-action='appointment-details']").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.skipClick === "true") return;
+      state.calendarBookingStartLocal = "";
+      closeUnavailableBlock();
+      state.calendarAppointmentId = button.dataset.id;
+      state.calendarAppointmentMode = "details";
+      render();
+    });
+  });
+
+  document.querySelectorAll(".calendar-event, .calendar-unavailable-block").forEach((button) => {
+    button.addEventListener("dragstart", (event) => {
+      if (!event.dataTransfer) return;
+      button.dataset.skipClick = "true";
+      button.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", button.dataset.id);
+      event.dataTransfer.setData("application/json", JSON.stringify({
+        id: button.dataset.id,
+        type: button.dataset.calendarItemType || "appointment"
+      }));
+    });
+
+    button.addEventListener("dragend", () => {
+      button.classList.remove("is-dragging");
+      window.setTimeout(() => {
+        button.dataset.skipClick = "";
+      }, 0);
+    });
+  });
+
+  document.querySelectorAll(".calendar-resize-handle").forEach((handle) => {
+    handle.addEventListener("pointerdown", startCalendarResize);
+  });
+
+  document.querySelectorAll(".calendar-cell[data-calendar-day][data-calendar-slot]").forEach((cell) => {
+    cell.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (!slotHasUnavailableConflict(cell.dataset.calendarDay, Number(cell.dataset.calendarSlot), 15)) {
+        cell.classList.add("is-drop-target");
+      }
+    });
+
+    cell.addEventListener("dragleave", () => {
+      cell.classList.remove("is-drop-target");
+    });
+
+    cell.addEventListener("drop", async (event) => {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      cell.classList.remove("is-drop-target");
+      const dragData = calendarDragData(event.dataTransfer);
+      if (!dragData.id) return;
+      if (dragData.type === "unavailable") {
+        moveUnavailableBlockToSlot(dragData.id, cell.dataset.calendarDay, Number(cell.dataset.calendarSlot));
+        render();
+        return;
+      }
+      await moveAppointmentToSlot(dragData.id, cell.dataset.calendarDay, Number(cell.dataset.calendarSlot));
+    });
+  });
+
+  document.querySelector("[data-action='appointment-modal-close']")?.addEventListener("click", () => {
+    state.calendarAppointmentId = "";
+    state.calendarAppointmentMode = "details";
+    render();
+  });
+
+  document.querySelectorAll("[data-action='calendar-booking-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeCalendarBooking();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='unavailable-block-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeUnavailableBlock();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='report-reminder-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeReportReminder();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-patient-file']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.patientFileClientId = button.dataset.clientId || "";
+      state.patientFileView = "details";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='patient-file-view']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.patientFileView = button.dataset.view || "details";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='patient-file-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.patientFileClientId = "";
+      state.patientFileView = "details";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='case-manager-profile']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.caseManagerProfileId = button.dataset.id || "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='case-manager-profile-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.caseManagerProfileId = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='delete-unavailable-block']").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteUnavailableBlock(button.dataset.id);
+      toast("Unavailable block deleted");
+      render();
+    });
+  });
+
+  document.querySelectorAll(".appointment-modal-backdrop").forEach((backdrop) => {
+    backdrop.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) return;
+      state.calendarAppointmentId = "";
+      state.calendarAppointmentMode = "details";
+      state.patientFileClientId = "";
+      state.patientFileView = "details";
+      state.adminArchivedAppointmentId = "";
+      state.caseManagerProfileId = "";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      closeReportReminder();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='appointment-reschedule']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarAppointmentId = button.dataset.id;
+      state.calendarAppointmentMode = "reschedule";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-note']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeAppointmentId = button.dataset.id;
+      state.expandedSignedNoteAppointmentId = "";
+      state.calendarAppointmentId = "";
+      state.calendarAppointmentMode = "details";
+      state.patientFileClientId = "";
+      state.patientFileView = "details";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      setActiveTab("notes");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-appointment-report']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const appointment = state.data.appointments.find((item) => item.id === button.dataset.id);
+      if (!appointment) return;
+      const existingReport = exactReportForAppointment(appointment);
+      state.reportClientId = appointment.clientId;
+      state.reportContractorId = appointment.contractorId;
+      state.reportAppointmentId = appointment.id;
+      state.reportType = existingReport?.type || (isEquipmentTrialReportAppointment(appointment) ? "Equipment Trial Report" : "Initial Physiotherapy Assessment Report");
+      state.calendarAppointmentId = "";
+      state.calendarAppointmentMode = "details";
+      state.patientFileClientId = "";
+      state.patientFileView = "details";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      resetReportDraftState();
+      setActiveTab("reports");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='expand-signed-note']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeAppointmentId = button.dataset.id;
+      state.expandedSignedNoteAppointmentId = button.dataset.id;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='appointment-status']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const appointment = state.data.appointments.find((item) => item.id === button.dataset.id);
+      const selectedStatus = button.dataset.status;
+      const status = appointment?.status === selectedStatus ? "booked" : selectedStatus;
+      await fetchJson(`/api/appointments/${button.dataset.id}`, {
+        method: "PATCH",
+        body: { status, actorId: state.data.currentUser.id }
+      });
+      toast(status === "booked" ? "Appointment status cleared" : "Appointment updated");
+      await loadData();
+    });
+  });
+
+  document.querySelector("#running-late-form")?.addEventListener("submit", submitRunningLate);
+
+  document.querySelectorAll("[data-action='appointment-archive']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await fetchJson(`/api/appointments/${button.dataset.id}`, {
+        method: "PATCH",
+        body: { status: "archived", actorId: state.data.currentUser.id }
+      });
+      if (state.calendarAppointmentId === button.dataset.id) state.calendarAppointmentId = "";
+      toast("Appointment archived");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='archived-appointment-open']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.adminArchivedAppointmentId = button.dataset.id || "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='archived-appointment-close']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.adminArchivedAppointmentId = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='archived-appointment-delete']").forEach((button) => {
+    button.addEventListener("click", () => {
+      void deleteArchivedAppointmentHistory(button.dataset.id);
+    });
+  });
+
+  document.querySelector("[data-action='archived-appointments-clear']")?.addEventListener("click", () => {
+    void clearArchivedAppointmentHistory();
+  });
+
+  document.querySelectorAll("[data-action='calendar-mode']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarMode = button.dataset.mode;
+      localStorage.setItem("refine-calendar-mode", state.calendarMode);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='calendar-date']").forEach((button) => {
+    button.addEventListener("click", () => {
+      setCalendarDateKey(button.dataset.date);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='calendar-shift']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const direction = Number(button.dataset.direction || 1);
+      const stepDays = state.calendarMode === "week" ? 7 : 1;
+      setCalendarDateKey(addDaysToDateKey(selectedCalendarDateKey(), direction * stepDays));
+      render();
+    });
+  });
+
+  document.querySelector("[data-action='calendar-date-input']")?.addEventListener("change", (event) => {
+    setCalendarDateKey(event.target.value);
+    render();
+  });
+
+  document.querySelectorAll("[data-action='calendar-skip']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const amount = Number(button.dataset.amount || 0);
+      const nextDate = button.dataset.unit === "months"
+        ? addMonthsToDateKey(selectedCalendarDateKey(), amount)
+        : addDaysToDateKey(selectedCalendarDateKey(), amount * 7);
+      setCalendarDateKey(nextDate);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='calendar-month-shift']").forEach((button) => {
+    button.addEventListener("click", () => {
+      shiftCalendarMonths(button.dataset.direction);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='select-rebook-slot']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const inputEl = document.querySelector("#rebook-form input[name='startsAtLocal']");
+      if (inputEl) inputEl.value = button.dataset.startLocal;
+      setNewAppointmentTimeFields(button.dataset.startLocal, defaultRebookDurationMinutes());
+      toast(`Selected ${formatSelectedSlot(button.dataset.startLocal)}`);
+    });
+  });
+
+  document.querySelectorAll("[data-action='rebook-appointment']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rebookClientId = button.dataset.clientId;
+      state.rebookFromAppointmentId = button.dataset.id;
+      state.calendarAppointmentId = "";
+      state.calendarAppointmentMode = "details";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      setActiveTab("rebook");
+      render();
+      focusRebookCalendar();
+    });
+  });
+
+  document.querySelectorAll("[data-action='rebook-client']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rebookClientId = button.dataset.clientId;
+      state.rebookFromAppointmentId = "";
+      state.rebookStatusClientId = "";
+      setActiveTab("rebook");
+      render();
+      focusRebookCalendar();
+    });
+  });
+
+  document.querySelectorAll("[data-action='rebook-status']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rebookStatusClientId = button.dataset.clientId;
+      state.rebookClientId = "";
+      state.rebookFromAppointmentId = "";
+      setActiveTab("rebook");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='cancel-rebook']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rebookClientId = "";
+      state.rebookFromAppointmentId = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='new-case']").forEach((button) => {
+    button.addEventListener("click", () => {
+      toast("Case can be added after the appointment is created");
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-wait-list']").forEach((button) => {
+    button.addEventListener("click", () => {
+      toast("Patient added to wait list");
+    });
+  });
+
+  document.querySelectorAll("[data-action='approval-needed']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.approvalClientId = button.dataset.clientId || "";
+      state.approvalAppointmentId = "";
+      setActiveTab("requests");
+      render();
+      void markApprovalResultsSeenForCurrentTab();
+    });
+  });
+
+  document.querySelectorAll("[data-action='approval-status']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await fetchJson(`/api/approval-requests/${button.dataset.id}`, {
+        method: "PATCH",
+        body: {
+          status: button.dataset.status,
+          actorId: state.data.currentUser.id,
+          resultMessage: approvalResultMessage(button.dataset.status)
+        }
+      });
+      toast("Approval result updated");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='inbox-status']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await fetchJson(`/api/inbox-items/${button.dataset.id}`, {
+        method: "PATCH",
+        body: {
+          status: button.dataset.status,
+          actorId: state.data.currentUser.id
+        }
+      });
+      toast("Approval updated");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='notification-read']").forEach((card) => {
+    const readUpdate = () => markNotificationRead(card.dataset.id);
+    card.addEventListener("click", readUpdate);
+    card.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      readUpdate();
+    });
+  });
+
+  document.querySelectorAll("[data-action='report-case-manager']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const report = state.data.reports.find((item) => item.id === button.dataset.id);
+      const sent = !report?.caseManagerSentAt;
+      await fetchJson(`/api/reports/${button.dataset.id}/case-manager`, {
+        method: "PATCH",
+        body: { actorId: state.data.currentUser.id, sent }
+      });
+      toast(sent ? "Report marked as sent to case manager" : "Report unmarked as sent");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='message-thread']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.messageThreadUserId = button.dataset.userId;
+      render();
+      void markVisibleMessagesRead();
+    });
+  });
+
+  document.querySelectorAll("[data-action='complete-report']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const appointment = state.data.appointments.find((item) => item.id === button.dataset.id);
+      if (!appointment) return;
+      state.reportClientId = appointment.clientId;
+      state.reportContractorId = appointment.contractorId;
+      state.reportAppointmentId = appointment.id;
+      state.reportType = reportTypeForAppointment(appointment);
+      resetReportDraftState();
+      setActiveTab("reports");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='report-reminder']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.reportReminderAppointmentId = button.dataset.id;
+      state.calendarAppointmentId = "";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-report']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const report = state.data.reports.find((item) => item.id === button.dataset.id);
+      if (!report) return;
+      state.reportClientId = report.clientId;
+      state.reportContractorId = report.contractorId;
+      state.reportAppointmentId = report.appointmentId || "";
+      state.reportType = report.type;
+      state.patientFileClientId = "";
+      resetReportDraftState();
+      setActiveTab("reports");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='assign-referral']").forEach((selectEl) => {
+    selectEl.addEventListener("change", async () => {
+      await fetchJson(`/api/referrals/${selectEl.dataset.id}`, {
+        method: "PATCH",
+        body: { assignedContractorId: selectEl.value, actorId: state.data.currentUser.id }
+      });
+      toast("Referral assigned");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='referral-status']").forEach((selectEl) => {
+    selectEl.addEventListener("change", async () => {
+      await fetchJson(`/api/referrals/${selectEl.dataset.id}`, {
+        method: "PATCH",
+        body: { status: selectEl.value, actorId: state.data.currentUser.id }
+      });
+      toast("Referral status updated");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='referral-edit']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.editReferralId = button.dataset.id || "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='referral-edit-cancel']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.editReferralId = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll(".referral-edit-form").forEach((form) => {
+    form.addEventListener("submit", submitReferralEdit);
+  });
+
+  document.querySelector("#note-appointment-select")?.addEventListener("change", (event) => {
+    state.activeAppointmentId = event.target.value;
+    state.expandedSignedNoteAppointmentId = "";
+    render();
+  });
+
+  document.querySelector("#note-search")?.addEventListener("input", (event) => {
+    state.noteSearch = event.target.value;
+    const query = state.noteSearch.trim().toLowerCase();
+    document.querySelectorAll("[data-note-search]").forEach((card) => {
+      const isActive = card.dataset.activeNote === "true";
+      card.hidden = Boolean(query) && !isActive && !(card.dataset.noteSearch || "").includes(query);
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-medical-alert']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.patientFileClientId = button.dataset.clientId || "";
+      toast("Open patient details to add the alert");
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='print-note']").forEach((button) => {
+    button.addEventListener("click", () => {
+      window.print();
+    });
+  });
+
+  document.querySelector("#outcome-measure-options")?.addEventListener("change", () => {
+    const selected = selectedOutcomeMeasureInputs();
+    state.noteOutcomeMeasures[outcomeMeasureContextKey()] = selected;
+    const form = document.querySelector("#note-form");
+    const reportForm = document.querySelector("#report-form");
+    const fields = form ? fieldPayload(form) : reportForm ? fieldPayload(reportForm) : {};
+    const customWrap = document.querySelector("#custom-outcome-wrap");
+    if (customWrap) customWrap.classList.toggle("hidden", !selected.includes("other"));
+    document.querySelectorAll(".outcome-measure-chip").forEach((chip) => {
+      const input = chip.querySelector("input");
+      chip.classList.toggle("selected", Boolean(input?.checked));
+    });
+    updateOutcomeMeasureOutputs(selected, fields);
+    const selectedPill = document.querySelector(".clinical-block .section-heading .pill");
+    if (selectedPill) selectedPill.textContent = `${selected.length} selected`;
+  });
+
+  document.querySelector("textarea[name='field_customOutcomeMeasures']")?.addEventListener("input", (event) => {
+    const selected = selectedOutcomeMeasureInputs();
+    const form = document.querySelector("#note-form");
+    const reportForm = document.querySelector("#report-form");
+    const fields = form ? fieldPayload(form) : reportForm ? fieldPayload(reportForm) : {};
+    fields.customOutcomeMeasures = event.target.value;
+    updateOutcomeMeasureOutputs(selected, fields);
+  });
+
+  document.querySelectorAll("[data-action='copy-previous-note']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const form = button.closest("#note-form");
+      const noteId = form?.querySelector("[data-previous-note-select]")?.value || "";
+      const sourceNote = state.data.treatmentNotes.find((note) => note.id === noteId);
+      if (!form || !sourceNote) return;
+
+      copyTreatmentNoteFieldsIntoForm(form, sourceNote.fields || {});
+      toast("Previous note copied into editable fields");
+    });
+  });
+
+  document.querySelector("#rebook-client-select")?.addEventListener("change", (event) => {
+    state.rebookClientId = event.target.value;
+    state.rebookFromAppointmentId = "";
+    render();
+  });
+
+  document.querySelector("#approval-client-select")?.addEventListener("change", (event) => {
+    state.approvalClientId = event.target.value;
+    state.approvalAppointmentId = "";
+    render();
+  });
+
+  document.querySelector("[data-action='calendar-booking-client']")?.addEventListener("change", (event) => {
+    state.calendarBookingClientId = event.target.value;
+    render();
+  });
+
+  document.querySelectorAll("#rebook-form input[name='bookingDate'], #rebook-form select[name='startHour'], #rebook-form select[name='startMinute'], #rebook-form select[name='startPeriod']").forEach((field) => {
+    field.addEventListener("change", syncRebookEndTimeFromStart);
+    field.addEventListener("input", syncRebookEndTimeFromStart);
+  });
+
+  document.querySelectorAll("[data-action='calendar-booking-patient-mode']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.calendarBookingPatientMode = button.dataset.mode;
+      if (state.calendarBookingPatientMode === "existing") {
+        state.calendarBookingClientId ||= state.data.clients[0]?.id || "";
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-equipment-trial']").forEach((button) => {
+    button.addEventListener("click", () => {
+      preserveReportDraft();
+      state.reportEquipmentTrialCount = Math.max(state.reportEquipmentTrialCount, document.querySelectorAll(".equipment-trial-block").length) + 1;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-equipment-option']").forEach((button) => {
+    button.addEventListener("click", () => {
+      preserveReportDraft();
+      const trialIndex = button.dataset.trialIndex;
+      const currentCount = document.querySelectorAll(`.equipment-trial-block[data-trial-index="${trialIndex}"] input[name*="_option_"]`).length;
+      state.reportEquipmentOptionCounts[trialIndex] = Math.max(state.reportEquipmentOptionCounts[trialIndex] || 0, currentCount) + 1;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='delete-equipment-option']").forEach((button) => {
+    button.addEventListener("click", () => {
+      preserveReportDraft();
+      const trialIndex = button.dataset.trialIndex;
+      const optionIndex = Number(button.dataset.optionIndex);
+      const currentCount = document.querySelectorAll(`.equipment-trial-block[data-trial-index="${trialIndex}"] input[name*="_option_"]`).length;
+      removeEquipmentOptionFromDraft(trialIndex, optionIndex, currentCount);
+      state.reportEquipmentOptionCounts[trialIndex] = Math.max(2, currentCount - 1);
+      render();
+    });
+  });
+
+  document.querySelector("[data-action='report-photo-input']")?.addEventListener("change", handleReportPhotoInput);
+
+  document.querySelectorAll("[data-action='remove-report-photo']").forEach((button) => {
+    button.addEventListener("click", () => {
+      removeReportPhotoAttachment(Number(button.dataset.index));
+    });
+  });
+
+  document.querySelectorAll("input[name^='field_equipmentTrial_'][name$='_chosenModel'], input[name^='field_equipmentTrial_'][name$='_title']").forEach((inputEl) => {
+    inputEl.addEventListener("input", updateEquipmentRecommendationsFromForm);
+  });
+
+  document.querySelector("#referral-form")?.addEventListener("submit", submitReferral);
+  document.querySelector("#case-manager-form")?.addEventListener("submit", submitCaseManager);
+  document.querySelectorAll("[data-case-manager-edit-form]").forEach((form) => {
+    form.addEventListener("submit", submitCaseManagerEdit);
+  });
+  document.querySelectorAll("[data-action='assign-case-manager']").forEach((selectEl) => {
+    selectEl.addEventListener("change", async () => {
+      await fetchJson(`/api/clients/${encodeURIComponent(selectEl.dataset.clientId)}/case-manager`, {
+        method: "PATCH",
+        body: {
+          caseManagerId: selectEl.value,
+          actorId: state.data.currentUser.id
+        }
+      });
+      toast(selectEl.value ? "Case manager assigned" : "Case manager removed");
+      await loadData();
+    });
+  });
+  document.querySelector("#reception-booking-form")?.addEventListener("submit", submitReceptionBooking);
+  document.querySelector("#rebook-form")?.addEventListener("submit", submitRebook);
+  document.querySelector("#rebook-status-form")?.addEventListener("submit", submitRebookStatus);
+  document.querySelector("#appointment-reschedule-form")?.addEventListener("submit", submitAppointmentReschedule);
+  document.querySelector("#calendar-booking-form")?.addEventListener("submit", submitCalendarBooking);
+  document.querySelector("#unavailable-block-form")?.addEventListener("submit", submitUnavailableBlock);
+  document.querySelector("#note-form")?.addEventListener("submit", submitNote);
+  document.querySelector("#report-form")?.addEventListener("submit", submitReport);
+  document.querySelector("#report-reminder-form")?.addEventListener("submit", submitReportReminder);
+  document.querySelector("#message-form")?.addEventListener("submit", submitMessage);
+  document.querySelector("#approval-form")?.addEventListener("submit", submitApproval);
+  document.querySelector("#report-type-select")?.addEventListener("change", (event) => {
+    state.reportType = event.target.value;
+    resetReportDraftState();
+    render();
+  });
+
+  document.querySelector("[data-action='sync-cliniko']")?.addEventListener("click", async () => {
+    const result = await fetchJson("/api/cliniko/sync", { method: "POST", body: {} });
+    toast(result.clinikoSync.message);
+    await loadData();
+  });
+
+  document.querySelectorAll("[data-action='cliniko-location-toggle']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const enabled = button.dataset.enabled === "true";
+      const result = await fetchJson(`/api/cliniko/locations/${button.dataset.id}`, {
+        method: "PATCH",
+        body: {
+          enabled,
+          actorId: state.data.currentUser.id
+        }
+      });
+      toast(`${result.location.displayName || result.location.name} ${enabled ? "enabled" : "disabled"} for Cliniko sync`);
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='cliniko-practitioner-toggle']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const enabled = button.dataset.enabled === "true";
+      const result = await fetchJson(`/api/cliniko/practitioners/${button.dataset.id}`, {
+        method: "PATCH",
+        body: {
+          enabled,
+          actorId: state.data.currentUser.id
+        }
+      });
+      toast(`${result.practitioner.name || "Practitioner"} ${enabled ? "enabled" : "disabled"} for Cliniko sync`);
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='owner-practitioner']").forEach((control) => {
+    control.addEventListener("change", () => {
+      state.ownerPractitionerId = control.value;
+      state.ownerView = control.value;
+      localStorage.setItem("refine-owner-practitioner", state.ownerPractitionerId);
+      localStorage.setItem("refine-owner-view", state.ownerView);
+      state.tabHistory = [];
+      state.calendarAppointmentId = "";
+      closeCalendarBooking();
+      closeUnavailableBlock();
+      render();
+    });
+  });
+
+  document.querySelector("[data-action='owner-view']")?.addEventListener("change", (event) => {
+    state.ownerView = event.target.value || "admin";
+    localStorage.setItem("refine-owner-view", state.ownerView);
+    state.tabHistory = [];
+    if (state.ownerView !== "admin") {
+      state.ownerPractitionerId = state.ownerView;
+      localStorage.setItem("refine-owner-practitioner", state.ownerPractitionerId);
+      state.tab = "today";
+    } else {
+      state.tab = "overview";
+    }
+    localStorage.setItem("refine-active-tab", state.tab);
+    state.calendarAppointmentId = "";
+    state.approvalClientId = "";
+    closeCalendarBooking();
+    closeUnavailableBlock();
+    render();
+  });
+
+  document.querySelectorAll("[data-action='sync-error-retry']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const result = await fetchJson(`/api/sync-errors/${button.dataset.id}/retry`, {
+        method: "POST",
+        body: { actorId: state.data.currentUser.id }
+      });
+      toast(result.result?.status === "synced" ? "Sync retry completed" : "Sync retry recorded");
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll("[data-action='upload-report-cliniko']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const result = await fetchJson(`/api/reports/${button.dataset.id}/cliniko-upload`, {
+        method: "POST",
+        body: { actorId: state.data.currentUser.id }
+      });
+      toast(result.upload?.status === "synced" ? "Report uploaded to Cliniko" : result.upload?.message || "Cliniko upload checked");
+      await loadData();
+    });
+  });
+}
+
+async function submitReferral(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  payload.actorId = state.data.currentUser.id;
+  await fetchJson("/api/referrals", { method: "POST", body: payload });
+  event.currentTarget.reset();
+  toast("Referral added");
+  await loadData();
+}
+
+async function submitReferralEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = formPayload(form);
+  payload.actorId = state.data.currentUser.id;
+  await fetchJson(`/api/referrals/${encodeURIComponent(form.dataset.referralId)}`, {
+    method: "PATCH",
+    body: payload
+  });
+  state.editReferralId = "";
+  toast("Referral updated");
+  await loadData();
+}
+
+async function submitReceptionBooking(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  const startsAt = new Date(payload.startsAtLocal);
+  const durationMinutes = Number(payload.durationMinutes || 60);
+  const contractor = state.data.contractors.find((item) => item.id === payload.contractorId);
+  payload.startsAt = startsAt.toISOString();
+  payload.endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000).toISOString();
+  payload.serviceType = contractor?.discipline || serviceForAppointmentType(payload.appointmentType);
+  delete payload.startsAtLocal;
+
+  const result = await fetchJson("/api/reception-bookings", { method: "POST", body: payload });
+  event.currentTarget.reset();
+  toast(bookingSyncMessage(result.appointment, "Patient booked"));
+  await loadData();
+}
+
+async function submitRebook(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  const times = appointmentTimesFromPayload(payload);
+  if (slotHasUnavailableConflict(times.dayKey, times.slot, times.durationMinutes)) {
+    toast("That time is marked unavailable");
+    return;
+  }
+  payload.startsAt = times.startsAt;
+  payload.endsAt = times.endsAt;
+  payload.durationMinutes = times.durationMinutes;
+  deleteAppointmentTimeFields(payload);
+
+  const appointment = await fetchJson("/api/appointments", { method: "POST", body: payload });
+  state.rebookFromAppointmentId = "";
+  state.rebookClientId = "";
+  state.rebookStatusClientId = "";
+  setActiveTab("today");
+  setCalendarDateKey(brisbaneDateKey(appointment.startsAt));
+  state.calendarAppointmentId = appointment.id;
+  state.calendarAppointmentMode = "details";
+  closeCalendarBooking();
+  closeUnavailableBlock();
+  toast(bookingSyncMessage(appointment, "Patient rebooked"));
+  await loadData();
+}
+
+async function submitCalendarBooking(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setFormSubmitting(form, true, "Creating...");
+
+  try {
+    const payload = formPayload(form);
+    const selectedClient = state.data.clients.find((client) => client.id === payload.clientId);
+    const times = appointmentTimesFromPayload(payload);
+    const blockKind = blockKindFromAppointmentType(payload.appointmentType);
+    const isNewPatient = payload.bookingPatientMode === "new";
+
+    if (blockKind) {
+      createCalendarBlockFromType(payload, times, blockKind);
+      return;
+    }
+
+    if (slotHasUnavailableConflict(times.dayKey, times.slot, times.durationMinutes)) {
+      toast("That time is marked unavailable");
+      return;
+    }
+
+    const appointmentsForContractor = appointmentsForPractitioner(state.data.appointments, payload.contractorId);
+    if (slotHasConflict(times.dayKey, times.slot, times.durationMinutes, appointmentsForContractor)) {
+      toast("That time already has an appointment");
+      return;
+    }
+
+    payload.startsAt = times.startsAt;
+    payload.endsAt = times.endsAt;
+    payload.durationMinutes = times.durationMinutes;
+    const practitioner = state.data.contractors.find((contractor) => contractor.id === payload.contractorId) || currentCalendarPractitioner();
+    payload.serviceType = practitioner?.discipline || state.data.currentUser.discipline;
+    deleteAppointmentTimeFields(payload);
+    delete payload.bookingPatientMode;
+
+    if (isNewPatient) {
+      delete payload.clientId;
+      const result = await fetchJson("/api/reception-bookings", { method: "POST", body: payload });
+      await finishCalendarBooking(result.appointment, "New patient booked");
+      return;
+    }
+
+    payload.address = selectedClient?.address || payload.address || "";
+    payload.contactNumber = selectedClient?.phone || "";
+
+    const appointment = await fetchJson("/api/appointments", { method: "POST", body: payload });
+    await finishCalendarBooking(appointment, "Appointment created");
+  } catch (error) {
+    toast(error.message || "Could not create appointment");
+  } finally {
+    setFormSubmitting(form, false);
+  }
+}
+
+async function finishCalendarBooking(appointment, fallback) {
+  closeCalendarBooking();
+  closeUnavailableBlock();
+
+  if (appointment?.startsAt) {
+    setActiveTab("today");
+    setCalendarDateKey(brisbaneDateKey(appointment.startsAt));
+  }
+
+  if (appointment?.id) {
+    state.calendarAppointmentId = appointment.id;
+    state.calendarAppointmentMode = "details";
+  }
+
+  toast(bookingSyncMessage(appointment, fallback));
+  await loadData();
+}
+
+function bookingSyncMessage(appointment, fallback) {
+  if (!appointment) return fallback;
+  if (appointment.syncStatus === "synced" && appointment.clinikoId) return `${fallback} and synced to Cliniko`;
+  if (appointment.syncStatus === "failed") return `${fallback}, but Cliniko sync failed${appointment.syncError ? `: ${appointment.syncError}` : ""}`;
+  if (appointment.syncStatus === "pending") return `${fallback}; Cliniko sync pending`;
+  return fallback;
+}
+
+function setFormSubmitting(form, isSubmitting, label = "Saving...") {
+  if (!form) return;
+  const button = form.querySelector("button[type='submit']");
+  form.classList.toggle("is-submitting", isSubmitting);
+  form.setAttribute("aria-busy", isSubmitting ? "true" : "false");
+  if (!button) return;
+
+  if (isSubmitting) {
+    button.dataset.originalText ||= button.textContent.trim();
+    button.textContent = label;
+    button.disabled = true;
+    return;
+  }
+
+  button.disabled = false;
+  if (button.dataset.originalText) {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+}
+
+function focusCalendarBookingField() {
+  window.setTimeout(() => {
+    if (!window.matchMedia("(min-width: 720px)").matches) return;
+    const form = document.querySelector("#calendar-booking-form");
+    const target = form?.querySelector("select[name='clientId'], input[name='fullName'], select[name='appointmentType']");
+    target?.focus({ preventScroll: true });
+  }, 0);
+}
+
+function calendarBookingSyncWarning(practitioner) {
+  const createModeEnabled = (state.data?.clinikoConfig?.mode || []).includes("appointment_create");
+  if (!createModeEnabled) return "";
+  if (practitioner?.clinikoSyncEnabled && practitioner?.clinikoPractitionerId) return "";
+  return "This practitioner is not enabled for Cliniko sync, so this booking will not create in Cliniko. Switch to an enabled Cliniko practitioner or enable them in Admin > Cliniko.";
+}
+
+function createCalendarBlockFromType(payload, times, blockKind) {
+  const practitionerId = payload.contractorId || currentCalendarPractitionerId();
+  const appointmentsForContractor = state.data.appointments.filter((appointment) =>
+    appointment.contractorId === practitionerId
+  );
+
+  if (slotHasConflict(times.dayKey, times.slot, times.durationMinutes, appointmentsForContractor)) {
+    toast("That time already has an appointment");
+    return;
+  }
+
+  if (slotHasUnavailableConflict(times.dayKey, times.slot, times.durationMinutes)) {
+    toast("That time is already blocked");
+    return;
+  }
+
+  const block = {
+    id: `${blockKind}-${Date.now()}`,
+    contractorId: practitionerId,
+    kind: blockKind,
+    startsAtLocal: times.startsAtLocal,
+    endsAtLocal: times.endsAtLocal,
+    note: payload.rebookReason || ""
+  };
+
+  state.unavailableBlocks = [...state.unavailableBlocks, block];
+  saveUnavailableBlocks();
+  closeCalendarBooking();
+  toast(`${blockKindLabel(blockKind)} block created`);
+  render();
+}
+
+async function submitUnavailableBlock(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  const times = appointmentTimesFromPayload({ ...payload, durationMinutes: 60 });
+  const currentBlockId = payload.id || "";
+  const currentBlock = state.unavailableBlocks.find((item) => item.id === currentBlockId);
+  const practitionerId = currentBlock?.contractorId || currentCalendarPractitionerId();
+  const appointmentsForContractor = state.data.appointments.filter((appointment) =>
+    appointment.contractorId === practitionerId
+  );
+
+  if (slotHasConflict(times.dayKey, times.slot, times.durationMinutes, appointmentsForContractor)) {
+    toast("That time already has an appointment");
+    return;
+  }
+
+  if (slotHasUnavailableConflict(times.dayKey, times.slot, times.durationMinutes, currentBlockId)) {
+    toast("That time is already unavailable");
+    return;
+  }
+
+  const block = {
+    id: currentBlockId || `unavailable-${Date.now()}`,
+    contractorId: practitionerId,
+    kind: payload.kind || state.unavailableBlockKind || "unavailable",
+    startsAtLocal: times.startsAtLocal,
+    endsAtLocal: times.endsAtLocal,
+    note: payload.note || ""
+  };
+
+  state.unavailableBlocks = [
+    ...state.unavailableBlocks.filter((item) => item.id !== block.id),
+    block
+  ];
+  saveUnavailableBlocks();
+  closeUnavailableBlock();
+  toast(`${blockKindLabel(block.kind)} block saved`);
+  render();
+}
+
+async function submitRebookStatus(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  await fetchJson("/api/rebook-statuses", { method: "POST", body: payload });
+  state.rebookStatusClientId = "";
+  toast("Status sent to reception");
+  await loadData();
+}
+
+async function submitAppointmentReschedule(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  await moveAppointmentToLocalStart(payload.appointmentId, payload.startsAtLocal, Number(payload.durationMinutes || 60), payload.appointmentType || "");
+}
+
+async function submitNote(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const mode = event.submitter?.value || "draft";
+  const payload = formPayload(form);
+  payload.fields = fieldPayload(form);
+  payload.status = mode === "signed" ? "signed" : "draft";
+
+  if (mode === "offline") {
+    localStorage.setItem(offlineKey(payload.appointmentId), JSON.stringify({ ...payload, savedAt: new Date().toISOString() }));
+    toast("Offline draft saved on this device");
+    render();
+    return;
+  }
+
+  const saved = await fetchJson("/api/treatment-notes", { method: "POST", body: payload });
+  localStorage.removeItem(offlineKey(payload.appointmentId));
+  const appointment = state.data.appointments.find((item) => item.id === payload.appointmentId);
+  const signedReportCopy = saved.status === "signed" && appointment && appointmentRequiresReport(appointment);
+  if (saved.status === "signed") {
+    state.expandedSignedNoteAppointmentId = "";
+    state.activeAppointmentId = nextIncompleteNoteAppointmentId(payload.appointmentId);
+  }
+  toast(treatmentNoteSaveMessage(saved, signedReportCopy));
+  await loadData();
+}
+
+function treatmentNoteSaveMessage(saved, signedReportCopy) {
+  if (saved.status !== "signed") return "Draft saved";
+  if (saved.clinikoUploadStatus === "synced") return "Notes completed and uploaded to Cliniko files";
+  if (saved.clinikoUploadStatus === "failed") return "Notes completed, but Cliniko file upload failed";
+  if (signedReportCopy) return "Notes completed and report sent to admin";
+  return "Notes completed";
+}
+
+async function submitReport(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const mode = event.submitter?.value || "draft";
+  const payload = formPayload(form);
+  payload.fields = fieldPayload(form);
+  payload.status = mode;
+  payload.actorId = state.data.currentUser.id;
+  payload.submittedForAdminReview = mode === "ready_for_admin" && (state.data.currentUser.role === "contractor" || ownerViewingPractitioner());
+  const saved = await fetchJson("/api/reports", { method: "POST", body: payload });
+  resetReportDraftState();
+  const sentToAdmin = payload.submittedForAdminReview;
+  if (sentToAdmin) {
+    const appointment = state.data.appointments.find((item) => item.id === (saved.appointmentId || payload.appointmentId));
+    if (appointment) {
+      setCalendarDateKey(brisbaneDateKey(appointment.startsAt));
+      state.calendarAppointmentId = appointment.id;
+      state.calendarAppointmentMode = "details";
+    } else {
+      state.calendarAppointmentId = "";
+    }
+    setActiveTab("today");
+    state.patientFileClientId = "";
+    closeCalendarBooking();
+    closeUnavailableBlock();
+    await loadData();
+    toast("Thank you for finalising your report!");
+    return;
+  }
+  toast(mode === "ready_for_admin" ? "Report signed off and sent to admin" : `Report ${reportStatusLabel(mode).toLowerCase()} saved`);
+  await loadData();
+}
+
+async function submitApproval(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  await fetchJson("/api/approval-requests", { method: "POST", body: payload });
+  state.approvalAppointmentId = "";
+  state.approvalClientId = "";
+  event.currentTarget.reset();
+  toast("Approval request sent to admin");
+  await loadData();
+}
+
+async function submitReportReminder(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  await fetchJson("/api/report-reminders", { method: "POST", body: payload });
+  closeReportReminder();
+  toast("Reminder sent to practitioner");
+  await loadData();
+}
+
+async function submitMessage(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  await fetchJson("/api/messages", { method: "POST", body: payload });
+  event.currentTarget.reset();
+  setActiveTab("messages");
+  toast("Message sent");
+  await loadData();
+}
+
+async function submitRunningLate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = formPayload(form);
+  const appointmentId = payload.appointmentId;
+  const submitButton = form.querySelector("button[type='submit']");
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const result = await fetchJson(`/api/appointments/${encodeURIComponent(appointmentId)}/running-late`, {
+      method: "POST",
+      body: payload
+    });
+    toast(result.alert ? "Reception notified" : "Late notice recorded");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function deleteArchivedAppointmentHistory(appointmentId) {
+  const appointment = (state.data.archivedAppointments || []).find((item) => item.id === appointmentId);
+  if (!appointment) return;
+  const patient = clientName(appointment.clientId);
+  const date = formatDateTime(appointment.startsAt);
+  const confirmed = window.confirm(`Delete archived history for ${patient} on ${date}? This keeps the patient file, notes, and reports.`);
+  if (!confirmed) return;
+
+  try {
+    await fetchJson(`/api/archived-appointments/${encodeURIComponent(appointmentId)}`, { method: "DELETE" });
+    if (state.adminArchivedAppointmentId === appointmentId) state.adminArchivedAppointmentId = "";
+    toast("Archived appointment history deleted");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function clearArchivedAppointmentHistory() {
+  const count = (state.data.archivedAppointments || []).length;
+  if (!count) return;
+  const confirmed = window.confirm(`Clear all ${count} archived appointment history record${count === 1 ? "" : "s"}? This keeps patient files, notes, and reports.`);
+  if (!confirmed) return;
+
+  try {
+    const result = await fetchJson("/api/archived-appointments", { method: "DELETE" });
+    state.adminArchivedAppointmentId = "";
+    toast(`${result.deleted || 0} archived appointment history record${result.deleted === 1 ? "" : "s"} cleared`);
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function submitCaseManager(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    const caseManager = await fetchJson("/api/case-managers", { method: "POST", body: formPayload(form) });
+    form.reset();
+    state.caseManagerProfileId = caseManager.id || "";
+    toast("Case manager profile created");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function submitCaseManagerEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await fetchJson(`/api/case-managers/${encodeURIComponent(form.dataset.id)}`, {
+      method: "PATCH",
+      body: formPayload(form)
+    });
+    toast("Case manager updated");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function submitCreateUser(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  try {
+    await fetchJson("/api/users", { method: "POST", body: normalizeUserFormPayload(payload) });
+    event.currentTarget.reset();
+    toast("User created");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function submitEditUser(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = normalizeUserFormPayload(formPayload(form));
+  try {
+    await fetchJson(`/api/users/${encodeURIComponent(form.dataset.userId)}`, {
+      method: "PATCH",
+      body: payload
+    });
+    toast("User updated");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function submitResetUserPassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = formPayload(form);
+  try {
+    await fetchJson(`/api/users/${encodeURIComponent(form.dataset.userId)}/password`, {
+      method: "POST",
+      body: payload
+    });
+    form.reset();
+    toast("Password reset");
+    await loadData();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function normalizeUserFormPayload(payload) {
+  return {
+    ...payload,
+    isActive: payload.isActive !== "false"
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    method: options.method || "GET",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || payload.detail || "Request failed");
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function loadUnavailableBlocks() {
+  try {
+    return JSON.parse(localStorage.getItem("refine-unavailable-blocks") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveUnavailableBlocks() {
+  localStorage.setItem("refine-unavailable-blocks", JSON.stringify(state.unavailableBlocks));
+}
+
+function formPayload(form) {
+  const data = new FormData(form);
+  return Object.fromEntries([...data.entries()].filter(([key]) => !key.startsWith("field_")));
+}
+
+function fieldPayload(form) {
+  const data = new FormData(form);
+  return [...data.entries()].reduce((fields, [key, value]) => {
+    if (key.startsWith("field_")) {
+      const fieldKey = key.replace("field_", "");
+      if (Object.hasOwn(fields, fieldKey)) {
+        fields[fieldKey] = Array.isArray(fields[fieldKey])
+          ? [...fields[fieldKey], value]
+          : [fields[fieldKey], value];
+      } else {
+        fields[fieldKey] = value;
+      }
+    }
+    return fields;
+  }, {});
+}
+
+function reportPhotoAttachmentsFromFields(fields = {}) {
+  const raw = fields.photoAttachments;
+  let parsed = [];
+
+  if (Array.isArray(raw)) {
+    parsed = raw;
+  } else if (typeof raw === "string" && raw.trim()) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = [];
+    }
+  }
+
+  return parsed
+    .filter((photo) => photo && typeof photo === "object" && String(photo.dataUrl || "").startsWith("data:image/jpeg;base64,"))
+    .slice(0, REPORT_PHOTO_LIMIT)
+    .map((photo, index) => ({
+      id: String(photo.id || `photo-${index + 1}`),
+      order: index + 1,
+      name: String(photo.name || `Photo ${index + 1}`).slice(0, 80),
+      mimeType: "image/jpeg",
+      width: Number(photo.width || 0),
+      height: Number(photo.height || 0),
+      dataUrl: String(photo.dataUrl || "").slice(0, REPORT_PHOTO_MAX_DATA_URL_LENGTH),
+      addedAt: photo.addedAt || ""
+    }))
+    .filter((photo) => photo.dataUrl.length < REPORT_PHOTO_MAX_DATA_URL_LENGTH);
+}
+
+function reportPhotoSizeLabel(photo) {
+  const width = Number(photo.width || 0);
+  const height = Number(photo.height || 0);
+  if (width && height) return `${width} x ${height}px`;
+  return "Compressed photo";
+}
+
+async function handleReportPhotoInput(event) {
+  const inputEl = event.currentTarget;
+  const form = inputEl.closest("#report-form");
+  const hiddenInput = form?.querySelector("input[name='field_photoAttachments']");
+  if (!form || !hiddenInput) return;
+
+  const existingPhotos = reportPhotoAttachmentsFromFields({ photoAttachments: hiddenInput.value });
+  const remainingSlots = REPORT_PHOTO_LIMIT - existingPhotos.length;
+  const files = [...(inputEl.files || [])].slice(0, Math.max(0, remainingSlots));
+
+  if (!remainingSlots) {
+    toast("Photo limit reached");
+    inputEl.value = "";
+    return;
+  }
+
+  if (!files.length) return;
+
+  try {
+    const newPhotos = [];
+    for (const file of files) {
+      newPhotos.push(await compressReportPhotoFile(file));
+    }
+
+    hiddenInput.value = JSON.stringify([...existingPhotos, ...newPhotos]);
+    preserveReportDraft();
+    toast(`${newPhotos.length} photo${newPhotos.length === 1 ? "" : "s"} attached to the report PDF`);
+    render();
+  } catch (error) {
+    toast(error.message || "Could not attach photo");
+  } finally {
+    inputEl.value = "";
+  }
+}
+
+function removeReportPhotoAttachment(index) {
+  const form = document.querySelector("#report-form");
+  const hiddenInput = form?.querySelector("input[name='field_photoAttachments']");
+  if (!form || !hiddenInput) return;
+
+  const photos = reportPhotoAttachmentsFromFields({ photoAttachments: hiddenInput.value });
+  photos.splice(index, 1);
+  hiddenInput.value = JSON.stringify(photos);
+  preserveReportDraft();
+  toast("Photo removed from report PDF");
+  render();
+}
+
+async function compressReportPhotoFile(file) {
+  if (!file || (file.type && !String(file.type || "").startsWith("image/"))) {
+    throw new Error("Please choose an image file");
+  }
+
+  const sourceDataUrl = await readFileAsDataUrl(file);
+  const image = await loadImageFromDataUrl(sourceDataUrl);
+  const width = image.naturalWidth || image.width || 1;
+  const height = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, REPORT_PHOTO_MAX_EDGE / Math.max(width, height));
+  const outputWidth = Math.max(1, Math.round(width * scale));
+  const outputHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  context.drawImage(image, 0, 0, outputWidth, outputHeight);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", REPORT_PHOTO_QUALITY);
+  if (dataUrl.length > REPORT_PHOTO_MAX_DATA_URL_LENGTH) {
+    throw new Error("That photo is too large. Please retake it or choose a smaller image.");
+  }
+
+  return {
+    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: file.name || `Report photo ${new Date().toLocaleDateString("en-AU")}`,
+    mimeType: "image/jpeg",
+    width: outputWidth,
+    height: outputHeight,
+    dataUrl,
+    addedAt: new Date().toISOString()
+  };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read the photo"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("This image format could not be attached. Please use a camera photo or JPG/PNG image."));
+    image.src = dataUrl;
+  });
+}
+
+function copyTreatmentNoteFieldsIntoForm(form, fields) {
+  if (!form || !fields) return;
+
+  if (Object.hasOwn(fields, "outcomeMeasures")) {
+    setFormControlValue(form.elements.namedItem("field_outcomeMeasures"), fields.outcomeMeasures);
+  }
+
+  for (const [key, value] of Object.entries(fields)) {
+    setFormControlValue(form.elements.namedItem(`field_${key}`), value);
+  }
+
+  const outcomeSelect = form.querySelector("#outcome-measure-select");
+  if (outcomeSelect) {
+    updateOutcomeMeasureOutputs([...outcomeSelect.selectedOptions].map((option) => option.value), {
+      ...fields,
+      ...fieldPayload(form)
+    });
+  }
+  const outcomeOptions = form.querySelector("#outcome-measure-options");
+  if (outcomeOptions) {
+    const selected = selectedOutcomeMeasureInputs(outcomeOptions);
+    updateOutcomeMeasureOutputs(selected, {
+      ...fields,
+      ...fieldPayload(form)
+    });
+    outcomeOptions.querySelectorAll(".outcome-measure-chip").forEach((chip) => {
+      const input = chip.querySelector("input");
+      chip.classList.toggle("selected", Boolean(input?.checked));
+    });
+  }
+}
+
+function setFormControlValue(control, value) {
+  if (!control) return;
+
+  const values = Array.isArray(value) ? value.map(String) : [String(value ?? "")];
+  if (control instanceof RadioNodeList) {
+    const controls = [...control].filter((item) => item instanceof HTMLInputElement);
+    if (controls.length && controls.every((item) => item.type === "checkbox")) {
+      controls.forEach((item) => {
+        item.checked = values.includes(item.value);
+      });
+      return;
+    }
+  }
+  const target = control instanceof RadioNodeList ? control[0] : control;
+  if (!target) return;
+
+  if (target instanceof HTMLSelectElement && target.multiple) {
+    [...target.options].forEach((option) => {
+      option.selected = values.includes(option.value);
+    });
+  } else if ("value" in target) {
+    target.value = Array.isArray(value) ? values.join("\n") : String(value ?? "");
+  }
+
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function preserveReportDraft() {
+  const form = document.querySelector("#report-form");
+  if (!form) return;
+  const appointmentId = form.querySelector("input[name='appointmentId']")?.value || "";
+  const type = form.querySelector("select[name='type']")?.value || state.reportType;
+  state.reportDraftKey = reportDraftKey(appointmentId, type);
+  state.reportDraftFields = fieldPayload(form);
+  state.reportDraftSummary = form.querySelector("textarea[name='summary']")?.value || "";
+}
+
+function resetReportDraftState() {
+  state.reportDraftFields = {};
+  state.reportDraftKey = "";
+  state.reportDraftSummary = "";
+  state.reportEquipmentTrialCount = 0;
+  state.reportEquipmentOptionCounts = {};
+}
+
+function removeEquipmentOptionFromDraft(trialIndex, optionIndex, currentCount) {
+  const fields = state.reportDraftFields;
+  for (let index = optionIndex; index < currentCount; index += 1) {
+    const currentKey = `equipmentTrial_${trialIndex}_option_${index}_name`;
+    const nextKey = `equipmentTrial_${trialIndex}_option_${index + 1}_name`;
+    fields[currentKey] = fields[nextKey] || "";
+  }
+  delete fields[`equipmentTrial_${trialIndex}_option_${currentCount}_name`];
+}
+
+function updateEquipmentRecommendationsFromForm() {
+  const form = document.querySelector("#report-form");
+  const list = document.querySelector("#equipment-recommendation-list");
+  if (!form || !list) return;
+  const fields = fieldPayload(form);
+  list.innerHTML = renderChosenModelRecommendations(fields);
+}
+
+function currentTabs() {
+  if (canUseOwnerWorkspace()) return ownerViewingPractitioner() ? contractorTabs : adminTabs;
+  if (state.data?.currentUser.role === "admin") return adminTabs;
+  if (state.data?.currentUser.role === "receptionist") return receptionistTabs;
+  return contractorTabs;
+}
+
+function canUseOwnerWorkspace() {
+  const user = state.data?.currentUser;
+  return Boolean(
+    user
+    && user.isOwner
+    && user.role !== "contractor"
+    && state.data?.permissions?.canAccessPractitionerWorkspace
+  );
+}
+
+function renderOwnerViewSelect() {
+  const contractors = state.data?.contractors || [];
+  return `
+    <label class="owner-view-control">
+      <span>Viewing</span>
+      <select data-action="owner-view" aria-label="Switch portal view">
+        <option value="admin" ${ownerViewingAdmin() ? "selected" : ""}>Admin</option>
+        ${contractors.map((contractor, index) => `
+          <option value="${escapeHtml(contractor.id)}" ${ownerViewValue() === contractor.id ? "selected" : ""}>
+            ${escapeHtml(contractor.name || `Practitioner ${index + 1}`)}
+          </option>
+        `).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function ownerViewValue() {
+  if (!canUseOwnerWorkspace()) return "";
+  const contractors = state.data?.contractors || [];
+  if (state.ownerView === "admin") return "admin";
+  if (contractors.some((contractor) => contractor.id === state.ownerView)) return state.ownerView;
+  if (contractors.some((contractor) => contractor.id === state.ownerPractitionerId)) return state.ownerPractitionerId;
+  return "admin";
+}
+
+function ownerViewingAdmin() {
+  return !canUseOwnerWorkspace() || ownerViewValue() === "admin";
+}
+
+function ownerViewingPractitioner() {
+  return Boolean(canUseOwnerWorkspace() && ownerViewValue() !== "admin");
+}
+
+function renderOwnerPractitionerSelect() {
+  const practitioner = currentCalendarPractitioner();
+  const contractors = state.data?.contractors || [];
+  if (!contractors.length) return "";
+  return `
+    <select class="scheduler-practitioner" data-action="owner-practitioner" aria-label="Choose practitioner">
+      ${contractors.map((contractor) => `
+        <option value="${escapeHtml(contractor.id)}" ${contractor.id === practitioner?.id ? "selected" : ""}>
+          ${escapeHtml(contractor.name)}
+        </option>
+      `).join("")}
+    </select>
+  `;
+}
+
+function currentCalendarPractitioner() {
+  const user = state.data?.currentUser;
+  if (!user) return null;
+  if (user.role === "contractor") return user;
+
+  const contractors = state.data?.contractors || [];
+  if (!contractors.length) return null;
+  const selectedId = ownerViewingPractitioner() ? ownerViewValue() : state.ownerPractitionerId;
+  const selected = contractors.find((contractor) => contractor.id === selectedId);
+  const practitioner = selected || contractors[0];
+  if (practitioner.id !== state.ownerPractitionerId) {
+    state.ownerPractitionerId = practitioner.id;
+    localStorage.setItem("refine-owner-practitioner", practitioner.id);
+  }
+  return practitioner;
+}
+
+function currentCalendarPractitionerId() {
+  return currentCalendarPractitioner()?.id || state.data?.currentUser?.id || "";
+}
+
+function appointmentsForPractitioner(appointments, practitionerId = currentCalendarPractitionerId()) {
+  if (!practitionerId) return [];
+  return (appointments || []).filter((appointment) => appointment.contractorId === practitionerId);
+}
+
+function clientsForPractitionerWorkspace(clients, practitionerId = currentCalendarPractitionerId()) {
+  if (!canUseOwnerWorkspace() || !practitionerId) return clients || [];
+  const clientIds = new Set([
+    ...appointmentsForPractitioner(state.data.appointments, practitionerId).map((appointment) => appointment.clientId),
+    ...(state.data.referrals || [])
+      .filter((referral) => referral.assignedContractorId === practitionerId)
+      .map((referral) => referral.clientId)
+  ]);
+  return (clients || []).filter((client) => clientIds.has(client.id));
+}
+
+function notificationsForPractitionerWorkspace() {
+  const notifications = state.data?.notifications || [];
+  if (!ownerViewingPractitioner()) return notifications;
+  const practitionerId = currentCalendarPractitionerId();
+  return notifications.filter((item) => item.userId === practitionerId);
+}
+
+function hiddenTabs() {
+  return ["notes", "reports", "notesDue", "reportsDue"];
+}
+
+function filterItems(items) {
+  const search = state.search.trim().toLowerCase();
+  if (!search) return items;
+  return items.filter((item) => JSON.stringify(item).toLowerCase().includes(search));
+}
+
+function filterArchivedAppointments(appointments) {
+  const search = state.search.trim().toLowerCase();
+  if (!search) return appointments;
+  return appointments.filter((appointment) => [
+    JSON.stringify(appointment),
+    clientName(appointment.clientId),
+    userName(appointment.contractorId),
+    userName(appointment.archivedBy),
+    userName(appointment.createdBy)
+  ].join(" ").toLowerCase().includes(search));
+}
+
+function appointmentsForDay(appointments, date) {
+  const day = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+  return appointments.filter((appointment) => new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(appointment.startsAt)) === day);
+}
+
+function sortAppointments(appointments) {
+  return [...appointments].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+}
+
+function sortAppointmentsNewest(appointments) {
+  return [...appointments].sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
+}
+
+function sortNotifications(notifications) {
+  return [...notifications].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function messageThreadUsers() {
+  return state.data.contractors
+    .map((user) => ({
+      ...user,
+      latestMessage: latestMessageForUser(user.id)
+    }))
+    .sort((a, b) => {
+      const aUnread = unreadMessagesFromUser(a.id).length;
+      const bUnread = unreadMessagesFromUser(b.id).length;
+      if (aUnread !== bUnread) return bUnread - aUnread;
+      const aTime = new Date(a.latestMessage?.createdAt || 0);
+      const bTime = new Date(b.latestMessage?.createdAt || 0);
+      return bTime - aTime || a.name.localeCompare(b.name);
+    });
+}
+
+function selectedMessageThreadUser(users) {
+  if (!users.length) return null;
+  const selected = users.find((user) => user.id === state.messageThreadUserId);
+  if (selected) return selected;
+  const withUnread = users.find((user) => unreadMessagesFromUser(user.id).length);
+  if (withUnread) return withUnread;
+  const withMessage = users.find((user) => latestMessageForUser(user.id));
+  return withMessage || users[0];
+}
+
+function messagesForThread(userId) {
+  return sortMessages((state.data.messages || []).filter((message) =>
+    (message.fromUserId === state.data.currentUser.id && message.toUserId === userId)
+    || (message.fromUserId === userId && message.toUserId === state.data.currentUser.id)
+  ));
+}
+
+function latestMessageForUser(userId) {
+  return sortMessages((state.data.messages || []).filter((message) =>
+    message.fromUserId === userId
+    || message.toUserId === userId
+  )).at(-1);
+}
+
+function unreadMessagesFromUser(userId) {
+  return (state.data.messages || []).filter((message) =>
+    message.fromUserId === userId
+    && message.toUserId === state.data.currentUser.id
+    && !(message.readBy || []).includes(state.data.currentUser.id)
+  );
+}
+
+function adminUser() {
+  return state.data.users.find((user) => user.role === "admin") || null;
+}
+
+function sortMessages(messages) {
+  return [...messages].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+}
+
+function sortArchivedAppointments(appointments) {
+  return [...appointments].sort((a, b) => new Date(b.archivedAt || b.updatedAt || b.startsAt) - new Date(a.archivedAt || a.updatedAt || a.startsAt));
+}
+
+function completedReportsForAdmin(reports) {
+  return [...reports]
+    .filter((report) => reportIsCompletedForAdmin(report) && reportTypeGoesToCaseManager(report.type))
+    .sort((a, b) => new Date(b.adminCopySentAt || b.updatedAt || b.createdAt || 0) - new Date(a.adminCopySentAt || a.updatedAt || a.createdAt || 0));
+}
+
+function reportIsCompletedForAdmin(report) {
+  return ["ready_for_admin", "final"].includes(report.status);
+}
+
+function reportTypeGoesToCaseManager(type) {
+  return ["Initial Physiotherapy Assessment Report", "Equipment Trial Report"].includes(type);
+}
+
+function bookedNewPatientReferrals(referrals) {
+  return [...referrals]
+    .filter((referral) => referral.status === "booked" && referral.referralSource === "Reception booking")
+    .sort((a, b) => {
+      const aAppointment = bookedAppointmentForReferral(a);
+      const bAppointment = bookedAppointmentForReferral(b);
+      return new Date(bAppointment?.startsAt || b.updatedAt || b.createdAt || 0) - new Date(aAppointment?.startsAt || a.updatedAt || a.createdAt || 0);
+    });
+}
+
+function bookedAppointmentForReferral(referral) {
+  const appointments = sortAppointments(state.data.appointments.filter((appointment) =>
+    appointment.clientId === referral.clientId && appointment.status !== "cancelled"
+  ));
+  const now = new Date();
+  return appointments.find((appointment) => new Date(appointment.startsAt) >= now) || appointments.at(-1) || null;
+}
+
+function sortInboxItems(items) {
+  const statusRank = { new: 0, in_progress: 1, waiting: 2, resolved: 3, closed: 4 };
+  return [...items].sort((a, b) => {
+    const statusDiff = (statusRank[a.status] ?? 5) - (statusRank[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    if (a.priority !== b.priority) return a.priority === "high" ? -1 : 1;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+}
+
+function approvalInboxItems(items) {
+  return (items || []).filter((item) => item.sourceType === "approval_request");
+}
+
+function activeApprovalInboxItems(items) {
+  return approvalInboxItems(items).filter((item) => !["resolved", "closed"].includes(item.status));
+}
+
+function groupByDay(appointments) {
+  return appointments.reduce((groups, appointment) => {
+    const day = new Intl.DateTimeFormat("en-AU", {
+      timeZone: "Australia/Brisbane",
+      weekday: "short",
+      day: "numeric",
+      month: "short"
+    }).format(new Date(appointment.startsAt));
+    groups[day] ||= [];
+    groups[day].push(appointment);
+    return groups;
+  }, {});
+}
+
+function selectedCalendarDateKey() {
+  return validDateKey(state.calendarDateKey)
+    ? state.calendarDateKey
+    : dateKeyFromParts(brisbaneParts(new Date()));
+}
+
+function setCalendarDateKey(key) {
+  if (!validDateKey(key)) return;
+  state.calendarDateKey = key;
+  state.calendarMonthOffset = 0;
+  localStorage.setItem("refine-calendar-date", key);
+  localStorage.setItem("refine-calendar-month-offset", "0");
+}
+
+function shiftCalendarMonths(direction) {
+  state.calendarMonthOffset += Number(direction || 0);
+  localStorage.setItem("refine-calendar-month-offset", String(state.calendarMonthOffset));
+}
+
+function validDateKey(key) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(key || ""));
+}
+
+function datePartsFromKey(key) {
+  if (!validDateKey(key)) return brisbaneParts(new Date());
+  const [year, month, day] = key.split("-").map(Number);
+  return { year, month, day };
+}
+
+function calendarDays(mode) {
+  const today = brisbaneParts(new Date());
+  const selectedParts = datePartsFromKey(selectedCalendarDateKey());
+  const selectedUtc = Date.UTC(selectedParts.year, selectedParts.month - 1, selectedParts.day);
+  const dayCount = mode === "week" ? 7 : 1;
+  const weekOffset = mode === "week" ? -((new Date(selectedUtc).getUTCDay() + 6) % 7) : 0;
+
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = new Date(selectedUtc + (weekOffset + index) * 24 * 60 * 60 * 1000);
+    const parts = {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate()
+    };
+
+    return {
+      key: dateKeyFromParts(parts),
+      isToday: dateKeyFromParts(parts) === dateKeyFromParts(today),
+      weekday: new Intl.DateTimeFormat("en-AU", { weekday: "short", timeZone: "Australia/Brisbane" }).format(date),
+      label: new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Brisbane" }).format(date),
+      heading: new Intl.DateTimeFormat("en-AU", {
+        weekday: "short",
+        day: "numeric",
+        month: "long",
+        timeZone: "Australia/Brisbane"
+      }).format(date)
+    };
+  });
+}
+
+function calendarSlots(appointments, days) {
+  const dayKeys = new Set(days.map((day) => day.key));
+  let min = 7 * 60;
+  let max = (21 * 60) + 15;
+
+  appointments
+    .filter((appointment) => appointment.status !== "cancelled" && dayKeys.has(brisbaneDateKey(appointment.startsAt)))
+    .forEach((appointment) => {
+      min = Math.min(min, appointmentSlotMinutes(appointment));
+      max = Math.max(max, appointmentEndSlotMinutes(appointment));
+    });
+
+  unavailableBlocksForDays(days).forEach((block) => {
+    min = Math.min(min, unavailableBlockStartSlot(block));
+    max = Math.max(max, unavailableBlockEndSlot(block));
+  });
+
+  min = Math.max(0, Math.floor(min / 15) * 15);
+  max = Math.min(24 * 60, Math.ceil(max / 15) * 15);
+  if (max <= min) max = min + 60;
+
+  const slots = [];
+  for (let slot = min; slot < max; slot += 15) {
+    slots.push(slot);
+  }
+  return slots;
+}
+
+function calendarSlotIsHour(slot) {
+  return slot % 60 === 0;
+}
+
+function calendarSlotIsHalfHour(slot) {
+  return slot % 60 === 30;
+}
+
+function calendarSlotIsOutsideWorkHours(slot) {
+  return slot < 9 * 60 || slot >= 17 * 60;
+}
+
+function calendarSlotClasses(slot, baseClass) {
+  return [
+    baseClass,
+    calendarSlotIsHour(slot) ? "is-hour" : "",
+    calendarSlotIsHalfHour(slot) ? "is-half-hour" : "",
+    calendarSlotIsOutsideWorkHours(slot) ? "is-outside-hours" : ""
+  ].filter(Boolean).join(" ");
+}
+
+function calendarTimeClass(slot) {
+  return calendarSlotClasses(slot, "calendar-time");
+}
+
+function calendarCellClass(slot) {
+  return calendarSlotClasses(slot, "calendar-cell");
+}
+
+function appointmentSlotMinutes(appointment) {
+  const parts = brisbaneParts(appointment.startsAt);
+  return parts.hour * 60 + Math.floor(parts.minute / 15) * 15;
+}
+
+function appointmentEndSlotMinutes(appointment) {
+  const start = appointmentSlotMinutes(appointment);
+  const startKey = brisbaneDateKey(appointment.startsAt);
+  const endKey = brisbaneDateKey(appointment.endsAt);
+  if (endKey !== startKey) return 24 * 60;
+
+  const parts = brisbaneParts(appointment.endsAt);
+  const end = parts.hour * 60 + Math.ceil(parts.minute / 15) * 15;
+  return Math.max(end, start + 15);
+}
+
+function appointmentSlotSpan(appointment) {
+  return Math.max(1, Math.round((appointmentEndSlotMinutes(appointment) - appointmentSlotMinutes(appointment)) / 15));
+}
+
+function appointmentDurationMinutes(appointment) {
+  const startsAt = new Date(appointment.startsAt);
+  const endsAt = new Date(appointment.endsAt);
+  const duration = Math.round((endsAt - startsAt) / 60000);
+  return Number.isFinite(duration) ? Math.max(15, duration) : 60;
+}
+
+function appointmentIsClinikoReadOnly(appointment) {
+  return Boolean(appointment?.clinikoId) && !state.data?.clinikoConfig?.appointmentWriteEnabled;
+}
+
+function appointmentEventTone(appointment) {
+  const typeInfo = appointmentTypeColour(appointment);
+  const baseTone = typeInfo?.eventTone || (appointmentRequiresReport(appointment) ? "is-report" : "is-physio");
+  if (appointment.status === "completed") return `${baseTone} is-complete`;
+  if (appointment.status === "pending_approval") return `${baseTone} is-pending-approval`;
+  if (appointment.status === "rescheduled") return `${baseTone} is-rescheduled`;
+  if (appointment.status === "no-show") return `${baseTone} is-no-show`;
+  return baseTone;
+}
+
+function appointmentCardTone(appointment) {
+  return appointmentTypeColour(appointment)?.eventTone || "";
+}
+
+function appointmentEventCaption(appointment) {
+  const typeInfo = appointmentTypeColour(appointment);
+  const label = typeInfo?.label || appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment";
+  return label;
+}
+
+function appointmentStatusEmoji(appointment) {
+  return "";
+}
+
+function appointmentCompletionMarkers(appointment) {
+  const markers = [];
+  const report = exactReportForAppointment(appointment);
+
+  if (appointmentRequiresTreatmentNote(appointment) && appointmentNotesComplete(appointment)) {
+    markers.push({ emoji: "📝", label: "Notes completed" });
+  }
+
+  if (appointmentRequiresReport(appointment) && report && reportIsCompletedForAdmin(report)) {
+    markers.push({ emoji: "📄", label: "Report sent" });
+  }
+
+  return markers;
+}
+
+function appointmentCompletionEmoji(appointment) {
+  const emoji = appointmentCompletionMarkers(appointment).map((marker) => marker.emoji).join("");
+  return emoji ? `${emoji} ` : "";
+}
+
+function renderAppointmentCompletionPills(appointment, withWrapper = true) {
+  const content = appointmentCompletionMarkers(appointment)
+    .map((marker) => `<span class="pill blue appointment-completion-pill" aria-label="${escapeHtml(marker.label)}" title="${escapeHtml(marker.label)}">${escapeHtml(marker.emoji)}</span>`)
+    .join("");
+
+  if (!content) return "";
+  return withWrapper ? `<div class="meta-row appointment-completion-row">${content}</div>` : content;
+}
+
+function renderCalendarCompletionText(appointment) {
+  return "";
+}
+
+function appointmentTypeColour(appointment) {
+  const type = `${appointment.appointmentType || ""} ${appointment.recurrence || ""}`.toLowerCase();
+  if (type.includes("equipment")) {
+    return {
+      eventTone: "is-type-equipment-trial",
+      pillTone: "equipment-trial",
+      label: "Equipment Trial"
+    };
+  }
+  if (type.includes("initial") && type.includes("sah")) {
+    return {
+      eventTone: "is-type-initial-sah",
+      pillTone: "initial-sah",
+      label: "Initial Physio SAH"
+    };
+  }
+  if (type.includes("subsequent") && type.includes("sah")) {
+    return {
+      eventTone: "is-type-subsequent-sah",
+      pillTone: "subsequent-sah",
+      label: "Subsequent Physio SAH"
+    };
+  }
+  if (type.includes("initial") && type.includes("chsp")) {
+    return {
+      eventTone: "is-type-initial-chsp",
+      pillTone: "initial-chsp",
+      label: "Initial Physio CHSP"
+    };
+  }
+  if (type.includes("subsequent") && type.includes("chsp")) {
+    return {
+      eventTone: "is-type-subsequent-chsp",
+      pillTone: "subsequent-chsp",
+      label: "Subsequent Physio CHSP"
+    };
+  }
+  return null;
+}
+
+function slotHasConflict(dayKey, slot, durationMinutes, appointments, ignoredAppointmentId = "") {
+  const proposedEnd = slot + durationMinutes;
+  return appointments.some((appointment) => {
+    if (appointment.id === ignoredAppointmentId) return false;
+    if (appointment.status === "cancelled") return false;
+    if (brisbaneDateKey(appointment.startsAt) !== dayKey) return false;
+
+    const appointmentStart = appointmentSlotMinutes(appointment);
+    const appointmentEnd = appointmentEndSlotMinutes(appointment);
+    return slot < appointmentEnd && proposedEnd > appointmentStart;
+  });
+}
+
+function slotHasUnavailableConflict(dayKey, slot, durationMinutes, ignoredBlockId = "") {
+  const proposedEnd = slot + durationMinutes;
+  return unavailableBlocksForDays([{ key: dayKey }]).some((block) => {
+    if (block.id === ignoredBlockId) return false;
+    const blockStart = unavailableBlockStartSlot(block);
+    const blockEnd = unavailableBlockEndSlot(block);
+    return slot < blockEnd && proposedEnd > blockStart;
+  });
+}
+
+function unavailableBlocksForDays(days) {
+  const dayKeys = new Set(days.map((day) => day.key));
+  const practitionerId = currentCalendarPractitionerId();
+  return state.unavailableBlocks
+    .filter((block) =>
+      block.contractorId === practitionerId
+      && dayKeys.has(unavailableBlockDayKey(block))
+    )
+    .sort((a, b) => a.startsAtLocal.localeCompare(b.startsAtLocal));
+}
+
+function unavailableBlockDayKey(block) {
+  return String(block.startsAtLocal || "").split("T")[0] || "";
+}
+
+function unavailableBlockStartSlot(block) {
+  return localSlotMinutes(block.startsAtLocal) ?? 0;
+}
+
+function unavailableBlockEndSlot(block) {
+  const start = unavailableBlockStartSlot(block);
+  const endDayKey = String(block.endsAtLocal || "").split("T")[0];
+  if (endDayKey && endDayKey !== unavailableBlockDayKey(block)) return 24 * 60;
+  return Math.max(start + 15, localSlotMinutes(block.endsAtLocal) ?? start + 60);
+}
+
+function unavailableBlockSlotSpan(block) {
+  return Math.max(1, Math.ceil((unavailableBlockEndSlot(block) - unavailableBlockStartSlot(block)) / 15));
+}
+
+function blockKindLabel(kind) {
+  return kind === "travel" ? "Travel" : "Unavailable";
+}
+
+function slotIsPast(dayKey, slot) {
+  const now = brisbaneParts(new Date());
+  const todayKey = dateKeyFromParts(now);
+  const currentSlot = now.hour * 60 + now.minute;
+
+  if (dayKey < todayKey) return true;
+  if (dayKey > todayKey) return false;
+  return slot <= currentSlot;
+}
+
+function localDateTimeFromDaySlot(dayKey, slot) {
+  const hour = Math.floor(slot / 60);
+  const minute = slot % 60;
+  return `${dayKey}T${pad2(hour)}:${pad2(minute)}`;
+}
+
+function localSlotMinutes(value) {
+  const timePart = String(value || "").split("T")[1] || "";
+  const [hour, minute] = timePart.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + Math.floor(minute / 15) * 15;
+}
+
+function isoFromBrisbaneLocalDateTime(value) {
+  const [datePart, timePart] = String(value || "").split("T");
+  if (!datePart || !timePart) return "";
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  if ([year, month, day, hour, minute].some((part) => !Number.isFinite(part))) return "";
+  return new Date(Date.UTC(year, month - 1, day, hour - 10, minute)).toISOString();
+}
+
+async function moveAppointmentToSlot(appointmentId, dayKey, slot) {
+  const appointment = state.data.appointments.find((item) => item.id === appointmentId);
+  if (!appointment || !dayKey || !Number.isFinite(slot)) return;
+  const startsAtLocal = localDateTimeFromDaySlot(dayKey, slot);
+  await moveAppointmentToLocalStart(appointment.id, startsAtLocal, appointmentDurationMinutes(appointment));
+}
+
+function moveUnavailableBlockToSlot(blockId, dayKey, slot) {
+  const block = state.unavailableBlocks.find((item) => item.id === blockId);
+  if (!block || !dayKey || !Number.isFinite(slot)) return;
+  const duration = unavailableBlockEndSlot(block) - unavailableBlockStartSlot(block);
+  const startsAtLocal = localDateTimeFromDaySlot(dayKey, slot);
+  const appointmentsForContractor = state.data.appointments.filter((appointment) =>
+    appointment.contractorId === block.contractorId
+  );
+
+  if (slotHasConflict(dayKey, slot, duration, appointmentsForContractor)) {
+    toast("That time already has an appointment");
+    return;
+  }
+
+  if (slotHasUnavailableConflict(dayKey, slot, duration, block.id)) {
+    toast("That time is already unavailable");
+    return;
+  }
+
+  block.startsAtLocal = startsAtLocal;
+  block.endsAtLocal = addMinutesToLocalDateTime(startsAtLocal, duration);
+  saveUnavailableBlocks();
+  toast(`Unavailable block moved to ${formatSelectedSlot(startsAtLocal)}`);
+}
+
+async function moveAppointmentToLocalStart(appointmentId, startsAtLocal, durationMinutes, appointmentType = "") {
+  const appointment = state.data.appointments.find((item) => item.id === appointmentId);
+  const dayKey = String(startsAtLocal || "").split("T")[0];
+  const slot = localSlotMinutes(startsAtLocal);
+  if (!appointment || !dayKey || slot === null) return;
+
+  if (appointmentIsClinikoReadOnly(appointment)) {
+    toast("Edit Cliniko synced appointments in Cliniko, then use Sync Now");
+    return;
+  }
+
+  const duration = Math.max(15, Number(durationMinutes) || appointmentDurationMinutes(appointment));
+  const appointmentsForContractor = state.data.appointments.filter((item) => item.contractorId === appointment.contractorId);
+  if (slotHasConflict(dayKey, slot, duration, appointmentsForContractor, appointment.id)) {
+    toast("That time overlaps another appointment");
+    return;
+  }
+
+  if (slotHasUnavailableConflict(dayKey, slot, duration)) {
+    toast("That time is marked unavailable");
+    return;
+  }
+
+  const startsAtIso = isoFromBrisbaneLocalDateTime(startsAtLocal);
+  if (!startsAtIso) {
+    toast("Choose a valid appointment time");
+    return;
+  }
+
+  const endsAtIso = new Date(new Date(startsAtIso).getTime() + duration * 60 * 1000).toISOString();
+  const body = {
+    startsAt: startsAtIso,
+    endsAt: endsAtIso,
+    actorId: state.data.currentUser.id
+  };
+  if (appointmentType) {
+    body.appointmentType = appointmentType;
+    body.recurrence = appointmentType;
+  }
+  try {
+    await fetchJson(`/api/appointments/${appointment.id}`, {
+      method: "PATCH",
+      body
+    });
+  } catch (error) {
+    toast(error.message);
+    await loadData();
+    return;
+  }
+  state.calendarAppointmentId = "";
+  state.calendarAppointmentMode = "details";
+  toast(appointment.clinikoId ? "Appointment updated in Cliniko" : `Appointment moved to ${formatSelectedSlot(startsAtLocal)}`);
+  await loadData();
+}
+
+function calendarDragData(dataTransfer) {
+  try {
+    const data = JSON.parse(dataTransfer.getData("application/json") || "{}");
+    if (data.id) return data;
+  } catch {
+    // Fall back to the plain text payload below.
+  }
+  return {
+    id: dataTransfer.getData("text/plain"),
+    type: "appointment"
+  };
+}
+
+function startCalendarResize(event) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const handle = event.currentTarget;
+  const itemEl = handle.closest(".calendar-event, .calendar-unavailable-block");
+  const source = calendarResizeSource(handle.dataset.resizeType, handle.dataset.resizeId);
+  if (!itemEl || !source) return;
+
+  itemEl.dataset.skipClick = "true";
+  itemEl.dataset.wasDraggable = itemEl.getAttribute("draggable") || "";
+  itemEl.setAttribute("draggable", "false");
+  itemEl.classList.add("is-resizing");
+  handle.setPointerCapture?.(event.pointerId);
+  let lastTarget = resizeTargetFromPoint(event.clientX, event.clientY, source.dayKey);
+
+  const resizeMove = (moveEvent) => {
+    const target = resizeTargetFromPoint(moveEvent.clientX, moveEvent.clientY, source.dayKey);
+    if (!target) return;
+    lastTarget = target;
+    const endSlot = Math.max(source.startSlot + 15, target.slot + 15);
+    const span = Math.ceil((endSlot - source.startSlot) / 15);
+    itemEl.style.setProperty("--slot-span", span);
+  };
+
+  const resizeEnd = async (upEvent) => {
+    document.removeEventListener("pointermove", resizeMove);
+    document.removeEventListener("pointerup", resizeEnd);
+    itemEl.classList.remove("is-resizing");
+    itemEl.setAttribute("draggable", itemEl.dataset.wasDraggable || "true");
+
+    const target = resizeTargetFromPoint(upEvent.clientX, upEvent.clientY, source.dayKey) || lastTarget;
+    const endSlot = target ? Math.max(source.startSlot + 15, target.slot + 15) : source.startSlot + source.duration;
+    const duration = Math.max(15, endSlot - source.startSlot);
+
+    if (source.type === "unavailable") {
+      resizeUnavailableBlock(source.id, duration);
+      render();
+    } else {
+      await resizeAppointment(source.id, duration);
+    }
+
+    window.setTimeout(() => {
+      itemEl.dataset.skipClick = "";
+    }, 0);
+  };
+
+  document.addEventListener("pointermove", resizeMove);
+  document.addEventListener("pointerup", resizeEnd, { once: true });
+}
+
+function calendarResizeSource(type, id) {
+  if (type === "unavailable") {
+    const block = state.unavailableBlocks.find((item) => item.id === id);
+    if (!block) return null;
+    const startSlot = unavailableBlockStartSlot(block);
+    return {
+      id,
+      type,
+      dayKey: unavailableBlockDayKey(block),
+      startSlot,
+      duration: unavailableBlockEndSlot(block) - startSlot
+    };
+  }
+
+  const appointment = state.data.appointments.find((item) => item.id === id);
+  if (!appointment) return null;
+  return {
+    id,
+    type: "appointment",
+    dayKey: brisbaneDateKey(appointment.startsAt),
+    startSlot: appointmentSlotMinutes(appointment),
+    duration: appointmentDurationMinutes(appointment)
+  };
+}
+
+function resizeTargetFromPoint(x, y, dayKey) {
+  const cells = [...document.querySelectorAll(".calendar-cell[data-calendar-day][data-calendar-slot]")]
+    .filter((item) => item.dataset.calendarDay === dayKey);
+  const columnCells = cells.filter((cell) => {
+    const rect = cell.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right;
+  });
+  if (!columnCells.length) return null;
+
+  const cell = columnCells.find((item) => {
+    const rect = item.getBoundingClientRect();
+    return y >= rect.top && y < rect.bottom;
+  }) || nearestCalendarCellByY(columnCells, y);
+
+  if (!cell) return null;
+  return { slot: Number(cell.dataset.calendarSlot) };
+}
+
+function nearestCalendarCellByY(cells, y) {
+  return cells
+    .map((cell) => {
+      const rect = cell.getBoundingClientRect();
+      return {
+        cell,
+        distance: y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0
+      };
+    })
+    .sort((a, b) => a.distance - b.distance)[0]?.cell || null;
+}
+
+async function resizeAppointment(appointmentId, durationMinutes) {
+  const appointment = state.data.appointments.find((item) => item.id === appointmentId);
+  if (!appointment) return;
+
+  if (appointmentIsClinikoReadOnly(appointment)) {
+    toast("Edit Cliniko synced appointments in Cliniko, then use Sync Now");
+    await loadData();
+    return;
+  }
+
+  const dayKey = brisbaneDateKey(appointment.startsAt);
+  const slot = appointmentSlotMinutes(appointment);
+  const duration = Math.max(15, Math.ceil(durationMinutes / 15) * 15);
+  const appointmentsForContractor = state.data.appointments.filter((item) => item.contractorId === appointment.contractorId);
+
+  if (slotHasConflict(dayKey, slot, duration, appointmentsForContractor, appointment.id)) {
+    toast("That length overlaps another appointment");
+    await loadData();
+    return;
+  }
+
+  if (slotHasUnavailableConflict(dayKey, slot, duration)) {
+    toast("That length overlaps unavailable time");
+    await loadData();
+    return;
+  }
+
+  const endsAt = new Date(new Date(appointment.startsAt).getTime() + duration * 60 * 1000).toISOString();
+  try {
+    await fetchJson(`/api/appointments/${appointment.id}`, {
+      method: "PATCH",
+      body: {
+        endsAt,
+        actorId: state.data.currentUser.id
+      }
+    });
+  } catch (error) {
+    toast(error.message);
+    await loadData();
+    return;
+  }
+  state.calendarAppointmentId = "";
+  state.calendarAppointmentMode = "details";
+  toast("Appointment length updated");
+  await loadData();
+}
+
+function resizeUnavailableBlock(blockId, durationMinutes) {
+  const block = state.unavailableBlocks.find((item) => item.id === blockId);
+  if (!block) return;
+  const dayKey = unavailableBlockDayKey(block);
+  const slot = unavailableBlockStartSlot(block);
+  const duration = Math.max(15, Math.ceil(durationMinutes / 15) * 15);
+  const appointmentsForContractor = state.data.appointments.filter((appointment) =>
+    appointment.contractorId === block.contractorId
+  );
+
+  if (slotHasConflict(dayKey, slot, duration, appointmentsForContractor)) {
+    toast("That length overlaps an appointment");
+    return;
+  }
+
+  if (slotHasUnavailableConflict(dayKey, slot, duration, block.id)) {
+    toast("That length overlaps another unavailable block");
+    return;
+  }
+
+  block.endsAtLocal = addMinutesToLocalDateTime(block.startsAtLocal, duration);
+  saveUnavailableBlocks();
+  toast("Unavailable block length updated");
+}
+
+function brisbaneDateKey(value) {
+  return dateKeyFromParts(brisbaneParts(value));
+}
+
+function brisbaneParts(value) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(value)).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: parts.weekday,
+    hour: Number(parts.hour) === 24 ? 0 : Number(parts.hour),
+    minute: Number(parts.minute)
+  };
+}
+
+function dateKeyFromParts(parts) {
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+function formatSlotTime(minutes) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const suffix = hour >= 12 ? "pm" : "am";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${pad2(minute)} ${suffix}`;
+}
+
+function formatCalendarTimeAxisLabel(minutes) {
+  if (!calendarSlotIsHour(minutes)) return "";
+  const hour = Math.floor(minutes / 60);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour} ${suffix}`;
+}
+
+function formatLocalTime(value) {
+  const slot = localSlotMinutes(value);
+  return slot === null ? "" : formatSlotTime(slot);
+}
+
+function formatSelectedSlot(value) {
+  const [datePart, timePart] = String(value || "").split("T");
+  if (!datePart || !timePart) return "appointment time";
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC"
+  }).format(date);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function defaultRebookStart(clientId) {
+  const sourceAppointment = state.data.appointments.find((appointment) => appointment.id === state.rebookFromAppointmentId);
+  const clientAppointments = sortAppointments(state.data.appointments.filter((appointment) => appointment.clientId === clientId));
+  const base = sourceAppointment || clientAppointments.at(-1);
+  const date = base ? new Date(base.startsAt) : new Date();
+  date.setDate(date.getDate() + (base ? 7 : 1));
+  if (!base) date.setHours(9, 0, 0, 0);
+  return toDateTimeLocalBrisbane(date);
+}
+
+function defaultUnavailableStartLocal() {
+  const now = new Date();
+  now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
+  return toDateTimeLocalBrisbane(now);
+}
+
+function defaultRebookDurationMinutes() {
+  return 60;
+}
+
+function toDateTimeLocalBrisbane(date) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function addMinutesToLocalDateTime(value, minutes) {
+  const [datePart, timePart] = String(value || "").split("T");
+  if (!datePart || !timePart) return value;
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  if ([year, month, day, hour, minute].some((part) => !Number.isFinite(part))) return value;
+
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute) + minutes * 60 * 1000);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}T${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+}
+
+function localDateTimeIsPast(value) {
+  const isoValue = isoFromBrisbaneLocalDateTime(value);
+  return isoValue ? new Date(isoValue) < new Date() : false;
+}
+
+function hourOptions() {
+  return Array.from({ length: 12 }, (_, index) => pad2(index + 1));
+}
+
+function minuteOptions() {
+  return ["00", "15", "30", "45"];
+}
+
+function timeSelectParts(value) {
+  const timePart = String(value || "").split("T")[1] || "09:00";
+  const [hourValue, minuteValue] = timePart.split(":").map(Number);
+  const hour24 = Number.isFinite(hourValue) ? hourValue : 9;
+  return {
+    hour: pad2(hour24 % 12 || 12),
+    minute: pad2(Number.isFinite(minuteValue) ? minuteValue : 0),
+    period: hour24 >= 12 ? "PM" : "AM"
+  };
+}
+
+function timePartSelect(name, options, selected) {
+  return `
+    <select name="${name}" aria-label="${escapeHtml(labelFromKey(name))}">
+      ${options.map((option) => `<option value="${escapeHtml(option)}" ${option === selected ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+    </select>
+  `;
+}
+
+function clientAddressLines(client) {
+  const lines = String(client.address || "")
+    .split(",")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return ["No address recorded"];
+  if (!lines.some((line) => line.toLowerCase() === "australia")) lines.push("Australia");
+  return lines;
+}
+
+function setNewAppointmentTimeFields(startsAtLocal, durationMinutes) {
+  const form = document.querySelector("#rebook-form");
+  if (!form || !startsAtLocal) return;
+  const duration = durationMinutes || defaultRebookDurationMinutes();
+  const endLocal = addMinutesToLocalDateTime(startsAtLocal, duration);
+  const startTime = timeSelectParts(startsAtLocal);
+  const endTime = timeSelectParts(endLocal);
+  const dateInput = form.querySelector("input[name='bookingDate']");
+  const durationInput = form.querySelector("input[name='durationMinutes']");
+  if (dateInput) dateInput.value = startsAtLocal.split("T")[0];
+  if (durationInput) durationInput.value = String(duration);
+  setFormValue(form, "startHour", startTime.hour);
+  setFormValue(form, "startMinute", startTime.minute);
+  setFormValue(form, "startPeriod", startTime.period);
+  setFormValue(form, "endHour", endTime.hour);
+  setFormValue(form, "endMinute", endTime.minute);
+  setFormValue(form, "endPeriod", endTime.period);
+}
+
+function syncRebookEndTimeFromStart() {
+  const form = document.querySelector("#rebook-form");
+  if (!form) return;
+  const bookingDate = form.querySelector("input[name='bookingDate']")?.value;
+  const startHour = form.querySelector("select[name='startHour']")?.value;
+  const startMinute = form.querySelector("select[name='startMinute']")?.value;
+  const startPeriod = form.querySelector("select[name='startPeriod']")?.value;
+  if (!bookingDate || !startHour || !startMinute || !startPeriod) return;
+  const startsAtLocal = `${bookingDate}T${timeSelectTo24Hour(startHour, startMinute, startPeriod)}`;
+  setNewAppointmentTimeFields(startsAtLocal, defaultRebookDurationMinutes());
+}
+
+function focusRebookCalendar() {
+  window.setTimeout(() => {
+    document.querySelector(".rebook-calendar-stage")?.scrollIntoView({ block: "start" });
+  }, 0);
+}
+
+function closeCalendarBooking() {
+  state.calendarBookingStartLocal = "";
+  state.calendarBookingClientId = "";
+  state.calendarBookingPatientMode = "existing";
+}
+
+function closeUnavailableBlock() {
+  state.unavailableBlockId = "";
+  state.unavailableBlockStartLocal = "";
+  state.unavailableBlockKind = "unavailable";
+}
+
+function closeReportReminder() {
+  state.reportReminderAppointmentId = "";
+}
+
+function deleteUnavailableBlock(id) {
+  state.unavailableBlocks = state.unavailableBlocks.filter((block) => block.id !== id);
+  saveUnavailableBlocks();
+  closeUnavailableBlock();
+}
+
+function setFormValue(form, name, value) {
+  const field = form.querySelector(`[name='${name}']`);
+  if (field) field.value = value;
+}
+
+function appointmentTimesFromPayload(payload) {
+  const startsAtLocal = payload.startsAtLocal || `${payload.bookingDate}T${timeSelectTo24Hour(payload.startHour, payload.startMinute, payload.startPeriod)}`;
+  const proposedEndLocal = payload.bookingDate
+    ? `${payload.bookingDate}T${timeSelectTo24Hour(payload.endHour, payload.endMinute, payload.endPeriod)}`
+    : addMinutesToLocalDateTime(startsAtLocal, Number(payload.durationMinutes || 60));
+  const startsAt = isoFromBrisbaneLocalDateTime(startsAtLocal);
+  let endsAt = isoFromBrisbaneLocalDateTime(proposedEndLocal);
+  let endsAtLocal = proposedEndLocal;
+  const fallbackDuration = Math.max(15, Number(payload.durationMinutes || 60));
+
+  if (!startsAt) throw new Error("Choose a valid appointment time");
+  if (!endsAt || new Date(endsAt) <= new Date(startsAt)) {
+    endsAt = new Date(new Date(startsAt).getTime() + fallbackDuration * 60 * 1000).toISOString();
+    endsAtLocal = addMinutesToLocalDateTime(startsAtLocal, fallbackDuration);
+  }
+
+  return {
+    startsAt,
+    endsAt,
+    startsAtLocal,
+    endsAtLocal,
+    dayKey: startsAtLocal.split("T")[0],
+    slot: localSlotMinutes(startsAtLocal) ?? 0,
+    durationMinutes: Math.max(15, Math.round((new Date(endsAt) - new Date(startsAt)) / 60000))
+  };
+}
+
+function timeSelectTo24Hour(hourValue, minuteValue, periodValue) {
+  let hour = Number(hourValue || 9);
+  const minute = Number(minuteValue || 0);
+  if (String(periodValue).toUpperCase() === "PM" && hour < 12) hour += 12;
+  if (String(periodValue).toUpperCase() === "AM" && hour === 12) hour = 0;
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function deleteAppointmentTimeFields(payload) {
+  [
+    "startsAtLocal",
+    "bookingDate",
+    "startHour",
+    "startMinute",
+    "startPeriod",
+    "endHour",
+    "endMinute",
+    "endPeriod"
+  ].forEach((field) => delete payload[field]);
+}
+
+function contractorOptions(includeBlank) {
+  const options = state.data.contractors.map((contractor) => [contractor.id, `${contractor.name} - ${contractor.discipline}`]);
+  return includeBlank ? [["", "Unassigned"], ...options] : options;
+}
+
+function bookingTypeOptions(discipline) {
+  return [
+    "Initial Physiotherapy SAH",
+    "Initial Physiotherapy CHSP",
+    "Subsequent Physiotherapy SAH",
+    "Subsequent Physiotherapy CHSP",
+    "Equipment Trial"
+  ];
+}
+
+function calendarBookingTypeOptions(discipline) {
+  return [
+    ...bookingTypeOptions(discipline),
+    "Unavailable block",
+    "Travel block"
+  ];
+}
+
+function appointmentTypeOptionsForEdit(appointment) {
+  const current = appointment.appointmentType || appointment.recurrence || "";
+  const clinikoTypes = (state.data.appointmentTypes || [])
+    .filter((type) => !type.archivedAt)
+    .map((type) => type.name)
+    .filter(Boolean);
+  return uniqueValues([
+    current,
+    ...clinikoTypes,
+    ...receptionAppointmentTypes()
+  ]);
+}
+
+function uniqueValues(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = String(value || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function blockKindFromAppointmentType(value) {
+  const type = String(value || "").toLowerCase();
+  if (type.includes("travel")) return "travel";
+  if (type.includes("unavailable")) return "unavailable";
+  return "";
+}
+
+function receptionAppointmentTypes() {
+  return [
+    "Initial Physiotherapy SAH",
+    "Initial Physiotherapy CHSP",
+    "Subsequent Physiotherapy SAH",
+    "Subsequent Physiotherapy CHSP",
+    "Equipment Trial"
+  ];
+}
+
+function serviceForAppointmentType(appointmentType) {
+  return "Physiotherapy";
+}
+
+function reportTypeForAppointment(appointment) {
+  if (isEquipmentTrialReportAppointment(appointment)) return "Equipment Trial Report";
+  if (isInitialPhysioReportAppointment(appointment)) return "Initial Physiotherapy Assessment Report";
+  return "";
+}
+
+function reportReminderDefaultMessage(appointment) {
+  const practitionerName = userName(appointment.contractorId).split(" ")[0] || "there";
+  const reportType = reportTypeForAppointment(appointment) || "report";
+  return `Hi ${practitionerName}, please finalise the ${reportType} for ${clientName(appointment.clientId)} from ${formatDateTime(appointment.startsAt)}. Thanks.`;
+}
+
+function isInitialPhysioReport(type) {
+  return String(type || "").toLowerCase().includes("initial physiotherapy");
+}
+
+function isEquipmentTrialReport(type) {
+  return String(type || "").toLowerCase().includes("equipment trial");
+}
+
+function reportDraftKey(appointmentId, type) {
+  return `${appointmentId || "new"}::${type || ""}`;
+}
+
+function equipmentTrialCount(fields = {}) {
+  const fromFields = maxEquipmentTrialIndex(fields);
+  return Math.max(state.reportEquipmentTrialCount || 0, fromFields, 1);
+}
+
+function equipmentOptionCount(trialIndex, fields = {}) {
+  const fromFields = maxEquipmentOptionIndex(trialIndex, fields);
+  return Math.max(state.reportEquipmentOptionCounts[trialIndex] || 0, fromFields, 2);
+}
+
+function maxEquipmentTrialIndex(fields = {}) {
+  return Object.keys(fields).reduce((max, key) => {
+    const match = key.match(/^equipmentTrial_(\d+)_/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+}
+
+function maxEquipmentOptionIndex(trialIndex, fields = {}) {
+  return Object.keys(fields).reduce((max, key) => {
+    const match = key.match(new RegExp(`^equipmentTrial_${trialIndex}_option_(\\d+)_name$`));
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+}
+
+function chosenEquipmentModels(fields = {}) {
+  const trialCount = equipmentTrialCount(fields);
+  const models = [];
+  for (let trialIndex = 1; trialIndex <= trialCount; trialIndex += 1) {
+    const model = String(fields[`equipmentTrial_${trialIndex}_chosenModel`] || "").trim();
+    if (!model) continue;
+    models.push({
+      title: fields[`equipmentTrial_${trialIndex}_title`] || `Trialled equipment ${trialIndex}`,
+      model
+    });
+  }
+  return models;
+}
+
+function appointmentContactNumber(appointment) {
+  return appointment.contactNumber || state.data.clients.find((client) => client.id === appointment.clientId)?.phone || "";
+}
+
+function appointmentClinikoNote(appointment) {
+  return String(appointment?.clinikoAppointmentNote || "").trim();
+}
+
+function appointmentReasonForReferral(appointment) {
+  const referral = (state.data.referrals || []).find((item) => item.clientId === appointment.clientId);
+  return appointment.reasonForReferral || referralReason(referral) || appointment.rebookReason || "";
+}
+
+function referralReason(referral) {
+  return referral?.reasonForReferral || referral?.goals || referral?.notes || "";
+}
+
+function normalisedDetailText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function appointmentReasonDetailHtml(appointment, label = "Reason") {
+  const clinikoNote = appointmentClinikoNote(appointment);
+  let reason = appointmentReasonForReferral(appointment);
+  if (clinikoNote && normalisedDetailText(reason) === normalisedDetailText(clinikoNote)) {
+    const referral = (state.data.referrals || []).find((item) => item.clientId === appointment.clientId);
+    reason = [referralReason(referral), appointment.rebookReason]
+      .find((value) => value && normalisedDetailText(value) !== normalisedDetailText(clinikoNote)) || "";
+    if (!reason) return "";
+  }
+  return `<div><strong>${escapeHtml(label)}</strong>${escapeHtml(reason || "Not recorded")}</div>`;
+}
+
+function clinikoAppointmentNoteDetailHtml(appointment, options = {}) {
+  const note = appointmentClinikoNote(appointment);
+  if (!note) return "";
+  const value = options.compact ? truncateText(note, options.maxLength || 120) : note;
+  return `<div class="cliniko-appointment-note"><strong>Cliniko note</strong>${escapeHtml(value)}</div>`;
+}
+
+function renderAppointmentClinikoNotePanel(appointment) {
+  const note = appointmentClinikoNote(appointment);
+  if (!note) return "";
+  const rows = note
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const visibleRows = rows.length ? rows : [note];
+
+  return `
+    <section class="appointment-modal-cliniko-note" aria-label="Cliniko appointment note">
+      <header>Cliniko appointment note</header>
+      ${visibleRows.map((line) => `
+        <div>
+          <span></span>
+          <p>${escapeHtml(line)}</p>
+        </div>
+      `).join("")}
+    </section>
+  `;
+}
+
+function clientNeedsRebook(client) {
+  return !clientHasUpcomingAppointment(client.id) && !clientHasRebookStatus(client.id);
+}
+
+function clientHasUpcomingAppointment(clientId) {
+  return state.data.appointments.some((appointment) =>
+    appointment.clientId === clientId
+    && !["cancelled", "no-show", "archived"].includes(appointment.status)
+    && new Date(appointment.startsAt) > new Date()
+  );
+}
+
+function nextAppointmentForClient(appointment) {
+  const currentStart = new Date(appointment.startsAt);
+  return sortAppointments(state.data.appointments.filter((item) =>
+    item.id !== appointment.id
+    && item.clientId === appointment.clientId
+    && !["cancelled", "archived"].includes(item.status)
+    && new Date(item.startsAt) > currentStart
+  ))[0] || null;
+}
+
+function clientHasRebookStatus(clientId) {
+  return state.data.rebookStatuses?.some((status) =>
+    status.clientId === clientId && status.status === "sent_to_reception"
+  );
+}
+
+function caseManagerForClient(client) {
+  if (!client) return null;
+  const direct = (state.data.caseManagers || []).find((item) => item.id === client.caseManagerId);
+  if (direct) return direct;
+  const referral = (state.data.referrals || []).find((item) => item.clientId === client.id);
+  if (referral?.caseManagerId) {
+    const fromReferral = (state.data.caseManagers || []).find((item) => item.id === referral.caseManagerId);
+    if (fromReferral) return fromReferral;
+  }
+  return null;
+}
+
+function caseManagerLabel(caseManager) {
+  return [caseManager.name, caseManager.organisation].filter(Boolean).join(" - ");
+}
+
+function caseManagerOptions(includeEmpty = false) {
+  const options = (state.data.caseManagers || [])
+    .map((caseManager) => [caseManager.id, caseManagerLabel(caseManager)]);
+  return includeEmpty ? [["", "No case manager"], ...options] : options;
+}
+
+function caseManagerSelectionValue(referral) {
+  return referral.caseManagerId || caseManagerFromReferral(referral)?.id || "";
+}
+
+function caseManagerProfilePatients(caseManagerId) {
+  const seen = new Set();
+  return (state.data.referrals || [])
+    .map((referral) => {
+      const client = (state.data.clients || []).find((item) => item.id === referral.clientId) || {};
+      const manager = caseManagerFromReferral(referral, client);
+      if (manager?.id !== caseManagerId || seen.has(referral.clientId)) return null;
+      seen.add(referral.clientId);
+      return { client, referral };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.client.name || a.referral.clientName || "").localeCompare(b.client.name || b.referral.clientName || ""));
+}
+
+function caseManagerContactLine(caseManager) {
+  return [caseManager.mobile, caseManager.email].filter(Boolean).join(" | ") || "No contact details";
+}
+
+function companyReferralGroups() {
+  const currentReferrals = (state.data.referrals || []).filter((referral) => !["discharged", "declined"].includes(referral.status));
+  const groups = new Map();
+
+  const ensureGroup = (company) => {
+    const name = String(company || "No company selected").trim() || "No company selected";
+    const key = name.toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, {
+        company: name,
+        managersMap: new Map(),
+        clients: [],
+        clientIds: new Set(),
+        practitionerIds: new Set()
+      });
+    }
+    return groups.get(key);
+  };
+
+  const ensureManager = (group, manager) => {
+    const managerKey = manager?.id || String(manager?.name || "No case manager selected").trim().toLowerCase() || "no-case-manager";
+    if (!group.managersMap.has(managerKey)) {
+      group.managersMap.set(managerKey, {
+        id: manager?.id || managerKey,
+        name: manager?.name || "No case manager selected",
+        contact: manager ? caseManagerContactLine(manager) : "",
+        clients: [],
+        clientIds: new Set()
+      });
+    }
+    return group.managersMap.get(managerKey);
+  };
+
+  for (const caseManager of state.data.caseManagers || []) {
+    const group = ensureGroup(caseManager.organisation || "No company selected");
+    ensureManager(group, caseManager);
+  }
+
+  for (const referral of currentReferrals) {
+    const client = state.data.clients.find((item) => item.id === referral.clientId) || {
+      id: referral.clientId,
+      name: referral.clientName,
+      phone: referral.phone,
+      fundingType: referral.fundingType
+    };
+    const manager = caseManagerFromReferral(referral, client);
+    const fallbackManager = manager || {
+      id: `unassigned-${String(referral.caseManager || "no-case-manager").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name: String(referral.caseManager || "No case manager selected").trim() || "No case manager selected",
+      organisation: "No company selected"
+    };
+    const group = ensureGroup(fallbackManager.organisation || "No company selected");
+    const managerGroup = ensureManager(group, fallbackManager);
+    const clientKey = client.id || referral.id;
+    if (managerGroup.clientIds.has(clientKey)) continue;
+
+    const item = { referral, client, manager };
+    managerGroup.clientIds.add(clientKey);
+    managerGroup.clients.push(item);
+    if (referral.assignedContractorId) group.practitionerIds.add(referral.assignedContractorId);
+    if (!group.clientIds.has(clientKey)) {
+      group.clientIds.add(clientKey);
+      group.clients.push(item);
+    }
+  }
+
+  const groupsList = [...groups.values()].map((group) => ({
+    company: group.company,
+    practitionerIds: group.practitionerIds,
+    clients: group.clients.sort((a, b) => String(a.client.name || a.referral.clientName || "").localeCompare(String(b.client.name || b.referral.clientName || ""))),
+    managers: [...group.managersMap.values()]
+      .map((manager) => ({
+        id: manager.id,
+        name: manager.name,
+        contact: manager.contact,
+        clients: manager.clients.sort((a, b) => String(a.client.name || a.referral.clientName || "").localeCompare(String(b.client.name || b.referral.clientName || "")))
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  })).sort((a, b) => {
+    if (a.company === "No company selected") return 1;
+    if (b.company === "No company selected") return -1;
+    return a.company.localeCompare(b.company);
+  });
+
+  const search = state.search.trim().toLowerCase();
+  if (!search) return groupsList;
+  return groupsList
+    .map((group) => {
+      const managers = group.managers
+        .map((manager) => ({
+          ...manager,
+          clients: manager.clients.filter((item) => companyReferralSearchText(group, manager, item).includes(search))
+        }))
+        .filter((manager) => manager.clients.length || [group.company, manager.name].join(" ").toLowerCase().includes(search));
+      return {
+        ...group,
+        managers,
+        clients: managers.flatMap((manager) => manager.clients),
+        practitionerIds: new Set(managers.flatMap((manager) => manager.clients.map((item) => item.referral.assignedContractorId).filter(Boolean)))
+      };
+    })
+    .filter((group) => group.managers.length || group.company.toLowerCase().includes(search));
+}
+
+function companyReferralSearchText(group, manager, item) {
+  return [
+    group.company,
+    manager.name,
+    item.client.name,
+    item.referral.clientName,
+    item.client.phone,
+    item.referral.phone,
+    item.client.fundingType,
+    item.referral.fundingType,
+    item.referral.status,
+    userName(item.referral.assignedContractorId)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function caseManagerFromReferral(referral = {}, client = {}) {
+  const caseManagers = state.data.caseManagers || [];
+  if (referral.caseManagerId) {
+    const direct = caseManagers.find((item) => item.id === referral.caseManagerId);
+    if (direct) return direct;
+  }
+  if (client.caseManagerId) {
+    const fromClient = caseManagers.find((item) => item.id === client.caseManagerId);
+    if (fromClient) return fromClient;
+  }
+  const referralName = String(referral.caseManager || "").trim().toLowerCase();
+  if (referralName) {
+    return caseManagers.find((item) => String(item.name || "").trim().toLowerCase() === referralName) || null;
+  }
+  return null;
+}
+
+function caseManagerCompanies() {
+  return [...new Set((state.data.caseManagers || [])
+    .map((item) => String(item.organisation || "").trim())
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function patientAppointments(clientId) {
+  const appointments = [
+    ...(state.data.appointments || []),
+    ...(state.data.archivedAppointments || [])
+  ].filter((appointment) => appointment.clientId === clientId);
+  return [...new Map(appointments.map((appointment) => [appointment.id, appointment])).values()]
+    .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+}
+
+function patientAppointmentIsPrevious(appointment) {
+  return new Date(appointment.startsAt) < new Date()
+    || ["completed", "cancelled", "no-show", "archived"].includes(appointment.status);
+}
+
+function noteForAppointment(appointmentId) {
+  return (state.data.treatmentNotes || []).find((note) => note.appointmentId === appointmentId);
+}
+
+function previousTreatmentNotesForAppointment(appointment) {
+  const currentTime = new Date(appointment.startsAt || 0).getTime();
+  const candidates = (state.data.treatmentNotes || [])
+    .filter((note) => note.clientId === appointment.clientId && note.appointmentId !== appointment.id && note.status === "signed")
+    .filter((note) => treatmentNoteHasCopyableFields(note, appointment))
+    .map((note) => ({
+      note,
+      appointment: appointmentById(note.appointmentId)
+    }))
+    .sort((a, b) => {
+      const aTime = new Date(a.appointment?.startsAt || a.note.updatedAt || a.note.createdAt || 0);
+      const bTime = new Date(b.appointment?.startsAt || b.note.updatedAt || b.note.createdAt || 0);
+      return bTime - aTime;
+    });
+
+  const earlierNotes = candidates.filter(({ note, appointment: noteAppointment }) => {
+    const noteTime = new Date(noteAppointment?.startsAt || note.updatedAt || note.createdAt || 0).getTime();
+    return Number.isFinite(noteTime) && Number.isFinite(currentTime) && noteTime < currentTime;
+  });
+
+  return earlierNotes.length ? earlierNotes : candidates;
+}
+
+function treatmentNoteHasCopyableFields(note, appointment) {
+  const fields = note.fields || {};
+  return editableTreatmentNoteFieldKeys(appointment).some((key) => String(fields[key] || "").trim());
+}
+
+function editableTreatmentNoteFieldKeys(appointment) {
+  if (isInitialPhysioAssessment(appointment)) {
+    return [
+      "reasonForReferral",
+      "medicalHistory",
+      "currentHomeSetUp",
+      "subjective",
+      "objectiveObservations",
+      "customOutcomeMeasures",
+      "assessment",
+      "treatment",
+      "recommendations",
+      "plan"
+    ];
+  }
+
+  return state.data.noteTemplates[appointment.serviceType || state.data.currentUser.discipline]
+    || state.data.noteTemplates["Physiotherapy"]
+    || [];
+}
+
+function patientCompletedWork(clientId) {
+  return [...patientCompletedNotes(clientId), ...patientCompletedReports(clientId)]
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function patientCompletedNotes(clientId) {
+  return (state.data.treatmentNotes || [])
+    .filter((note) => note.clientId === clientId && note.status === "signed")
+    .map((note) => {
+      const appointment = appointmentById(note.appointmentId);
+      return {
+        kind: "note",
+        id: note.id,
+        appointmentId: note.appointmentId,
+        title: "Notes completed",
+        status: "Notes completed",
+        summary: "Notes completed",
+        appointmentDate: appointment?.startsAt || note.updatedAt || note.createdAt,
+        date: appointment?.startsAt || note.updatedAt || note.createdAt
+      };
+    });
+}
+
+function patientCompletedReports(clientId) {
+  return (state.data.reports || [])
+    .filter((report) => report.clientId === clientId && ["ready_for_admin", "final"].includes(report.status))
+    .map((report) => ({
+      kind: "report",
+      id: report.id,
+      appointmentId: report.appointmentId || "",
+      title: report.type || "Report",
+      status: reportStatusLabel(report.status),
+      summary: report.summary || "Report ready for admin review.",
+      date: report.adminCopySentAt || report.updatedAt || report.createdAt
+    }))
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function appointmentById(id) {
+  return [...(state.data.appointments || []), ...(state.data.archivedAppointments || [])]
+    .find((appointment) => appointment.id === id);
+}
+
+function noteSummary(note) {
+  const fields = note.fields || {};
+  const text = fields.assessment
+    || fields.treatment
+    || fields.plan
+    || fields.subjective
+    || fields.objective
+    || fields.objectiveObservations
+    || "";
+  return truncateText(text, 160) || "Signed treatment note.";
+}
+
+function patientClientAddress(clientId) {
+  return state.data.clients.find((client) => client.id === clientId)?.address || "";
+}
+
+function googleMapsDirectionsUrl(address) {
+  const destination = String(address || "").trim();
+  if (!destination) return "";
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+}
+
+function renderDirectionsLink(address, label = "Directions") {
+  const url = googleMapsDirectionsUrl(address);
+  if (!url) return "";
+  return `<a class="button secondary directions-link" target="_blank" rel="noreferrer" href="${url}">${escapeHtml(label)}</a>`;
+}
+
+function pollingIntervalLabel(clinikoConfig) {
+  if (!clinikoConfig?.pollEnabled) return "polling off";
+  if (clinikoConfig.pollingIntervalSeconds) return `${clinikoConfig.pollingIntervalSeconds}s polling`;
+  return `${clinikoConfig.pollingIntervalMinutes || 5}m polling`;
+}
+
+function appointmentActionStatuses() {
+  return state.data.appointmentStatuses.filter((status) => !["pending_approval", "booked", "confirmed"].includes(status));
+}
+
+function appointmentStatusButtonClass(appointment, status) {
+  return appointment.status === status ? "" : "secondary";
+}
+
+function appointmentStatusLabel(status) {
+  return {
+    pending_approval: "pending approval",
+    booked: "booked",
+    confirmed: "confirmed",
+    completed: "completed",
+    cancelled: "cancelled",
+    archived: "archived",
+    rescheduled: "rescheduled",
+    "no-show": "no-show"
+  }[status] || String(status || "").replaceAll("_", " ");
+}
+
+function appointmentStatusTone(status) {
+  return {
+    pending_approval: "gold",
+    booked: "blue",
+    confirmed: "blue",
+    cancelled: "coral",
+    archived: "coral",
+    rescheduled: "gold",
+    "no-show": "coral"
+  }[status] || "";
+}
+
+function appointmentNotesComplete(appointment) {
+  return state.data.treatmentNotes.some((note) =>
+    note.appointmentId === appointment.id && note.status === "signed"
+  );
+}
+
+function appointmentNotesDue(appointment) {
+  return !["cancelled", "archived"].includes(appointment.status)
+    && appointmentRequiresTreatmentNote(appointment)
+    && !appointmentNotesComplete(appointment);
+}
+
+function appointmentReportDue(appointment) {
+  if (["cancelled", "archived"].includes(appointment.status)) return false;
+  if (!appointmentRequiresReport(appointment)) return false;
+
+  const report = exactReportForAppointment(appointment);
+  const completedReport = report && reportIsCompletedForAdmin(report);
+
+  return !completedReport;
+}
+
+function appointmentRequiresReport(appointment) {
+  return isInitialPhysioReportAppointment(appointment) || isEquipmentTrialReportAppointment(appointment);
+}
+
+function isInitialPhysioAssessment(appointment) {
+  return isInitialPhysioReportAppointment(appointment);
+}
+
+function appointmentRequiresTreatmentNote(appointment) {
+  return isSubsequentPhysioTreatmentNoteAppointment(appointment);
+}
+
+function isInitialPhysioReportAppointment(appointment) {
+  return appointmentMatchesPhysioFundingType(appointment, "initial");
+}
+
+function isSubsequentPhysioTreatmentNoteAppointment(appointment) {
+  return appointmentMatchesPhysioFundingType(appointment, "subsequent");
+}
+
+function isEquipmentTrialReportAppointment(appointment) {
+  return appointmentBookingText(appointment).includes("equipment");
+}
+
+function appointmentMatchesPhysioFundingType(appointment, visitStage) {
+  const bookingType = appointmentBookingText(appointment);
+  const isPhysio = appointment.serviceType === "Physiotherapy" || bookingType.includes("physio");
+  return isPhysio
+    && bookingType.includes(visitStage)
+    && (bookingType.includes("sah") || bookingType.includes("chsp"));
+}
+
+function appointmentBookingText(appointment) {
+  return `${appointment.appointmentType || ""} ${appointment.recurrence || ""}`.toLowerCase();
+}
+
+function selectedOutcomeMeasuresForAppointment(appointmentId, fields) {
+  if (state.noteOutcomeMeasures[appointmentId]) return state.noteOutcomeMeasures[appointmentId];
+  return normalizeFieldArray(fields.outcomeMeasures);
+}
+
+function selectedOutcomeMeasureInputs(root = document) {
+  return [...root.querySelectorAll("input[name='field_outcomeMeasures']:checked")]
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function outcomeMeasureContextKey() {
+  const reportForm = document.querySelector("#report-form");
+  if (reportForm) {
+    const appointmentId = reportForm.querySelector("input[name='appointmentId']")?.value || "";
+    const type = reportForm.querySelector("select[name='type']")?.value || state.reportType;
+    return `report-${reportDraftKey(appointmentId, type)}`;
+  }
+  return state.activeAppointmentId || "note";
+}
+
+function updateOutcomeMeasureOutputs(selectedMeasures, fields) {
+  const customMeasures = customOutcomeMeasuresFromFields(fields);
+  const allMeasures = outcomeMeasureRows(selectedMeasures, customMeasures);
+  const tableWrap = document.querySelector("#outcome-measure-table-wrap");
+  const valuesWrap = document.querySelector("#normative-values-wrap");
+  if (tableWrap) tableWrap.innerHTML = renderOutcomeMeasureTable(allMeasures, fields);
+  if (valuesWrap) valuesWrap.innerHTML = renderNormativeValues(allMeasures);
+}
+
+function outcomeMeasureRows(selectedMeasures, customMeasures = []) {
+  const standardRows = selectedMeasures
+    .filter((id) => id !== "other")
+    .map(outcomeMeasureById);
+  return [...standardRows, ...customMeasures];
+}
+
+function customOutcomeMeasuresFromFields(fields = {}) {
+  return String(fields.customOutcomeMeasures || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((label, index) => ({
+      id: `custom_${slugify(label)}_${index + 1}`,
+      label,
+      reference: "Custom measure. Add the relevant normative value, cut-off, or clinical interpretation in the clinical note."
+    }));
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    || "measure";
+}
+
+function normalizeFieldArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return [value];
+}
+
+function outcomeMeasureById(id) {
+  return physioOutcomeMeasures.find((measure) => measure.id === id) || {
+    id,
+    label: id,
+    reference: "No reference value recorded."
+  };
+}
+
+function reportForAppointment(appointment) {
+  const expectedType = reportTypeForAppointment(appointment);
+  return state.data.reports.find((report) => report.appointmentId === appointment.id)
+    || state.data.reports.find((report) =>
+      !report.appointmentId
+      && expectedType
+      && report.clientId === appointment.clientId
+      && report.contractorId === appointment.contractorId
+      && report.type === expectedType
+    );
+}
+
+function exactReportForAppointment(appointment) {
+  return state.data.reports.find((report) => report.appointmentId === appointment.id);
+}
+
+function noteDaysOverdue(appointment) {
+  const todayKey = dateKeyFromParts(brisbaneParts(new Date()));
+  const appointmentKey = brisbaneDateKey(appointment.startsAt);
+  return Math.max(0, Math.floor((dateKeyToUtcMs(todayKey) - dateKeyToUtcMs(appointmentKey)) / 86400000));
+}
+
+function noteDueAgeLabel(appointment) {
+  const days = noteDaysOverdue(appointment);
+  if (days === 0) return "Due today";
+  return `${days} day${days === 1 ? "" : "s"} overdue`;
+}
+
+function reportDueDateKey(appointment) {
+  return addDaysToDateKey(brisbaneDateKey(appointment.startsAt), 2);
+}
+
+function reportDueBucket(appointment) {
+  const todayKey = dateKeyFromParts(brisbaneParts(new Date()));
+  const dueKey = reportDueDateKey(appointment);
+
+  if (todayKey < dueKey) return "upcoming";
+  if (todayKey > dueKey) return "overdue";
+  return "today";
+}
+
+function reportDueAgeLabel(appointment) {
+  const todayKey = dateKeyFromParts(brisbaneParts(new Date()));
+  const dueKey = reportDueDateKey(appointment);
+  const dayGap = Math.floor((dateKeyToUtcMs(dueKey) - dateKeyToUtcMs(todayKey)) / 86400000);
+
+  if (dayGap < 0) {
+    const overdueDays = Math.abs(dayGap);
+    return `${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`;
+  }
+
+  if (dayGap === 0) return "Due today";
+  if (dayGap === 1) return "Due tomorrow";
+  return `Due in ${dayGap} days`;
+}
+
+function dateKeyToUtcMs(key) {
+  const [year, month, day] = key.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+function addDaysToDateKey(key, days) {
+  const date = new Date(dateKeyToUtcMs(key) + days * 86400000);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+function addMonthsToDateKey(key, months) {
+  const parts = datePartsFromKey(key);
+  const date = new Date(Date.UTC(parts.year, parts.month - 1 + months, parts.day));
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+function dueBucket(appointment) {
+  const todayKey = dateKeyFromParts(brisbaneParts(new Date()));
+  const appointmentKey = brisbaneDateKey(appointment.startsAt);
+  if (appointmentKey < todayKey) return "overdue";
+  if (appointmentKey === todayKey) return "today";
+  return "upcoming";
+}
+
+function dueBucketLabel(appointment) {
+  return {
+    overdue: "Overdue",
+    today: "Due today",
+    upcoming: "Upcoming"
+  }[dueBucket(appointment)];
+}
+
+function reportStatusLabel(status) {
+  return {
+    not_started: "Not started",
+    draft: "Draft",
+    ready_for_admin: "Ready for admin",
+    final: "Final"
+  }[status] || "Draft";
+}
+
+function roleLabel(role) {
+  return {
+    admin: "Admin",
+    receptionist: "Receptionist",
+    contractor: "Practitioner"
+  }[role] || "Staff";
+}
+
+function reportTone(status) {
+  return {
+    not_started: "coral",
+    draft: "gold",
+    ready_for_admin: "blue",
+    final: ""
+  }[status] || "gold";
+}
+
+function sortApprovalRequests(requests) {
+  return [...requests].sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+}
+
+function activeApprovalRequests(requests) {
+  return sortApprovalRequests(requests).filter((request) => !["approved", "declined"].includes(request.status));
+}
+
+function approvalStatusLabel(status) {
+  return {
+    pending: "Currently waiting for approval",
+    waiting: "Currently waiting for approval",
+    approved: "Approved",
+    declined: "Declined"
+  }[status] || "Currently waiting for approval";
+}
+
+function inboxStatusLabel(status) {
+  return {
+    new: "New",
+    in_progress: "In progress",
+    waiting: "Waiting",
+    resolved: "Resolved",
+    closed: "Closed"
+  }[status] || "New";
+}
+
+function inboxTone(status) {
+  return {
+    new: "gold",
+    in_progress: "blue",
+    waiting: "gold",
+    resolved: "",
+    closed: ""
+  }[status] || "gold";
+}
+
+function inboxSourceLabel(sourceType) {
+  return {
+    approval_request: "approval request",
+    rebook_status: "rebook status",
+    referral: "new referral",
+    report_copy: "report for review",
+    running_late: "running late"
+  }[sourceType] || "workflow";
+}
+
+function notificationTypeLabel(type) {
+  return {
+    report_reminder: "Report reminder",
+    approval_result: "Approval update",
+    appointment_rebooked: "Rebooking update",
+    new_patient_booked: "New patient booking",
+    new_referral_assigned: "New referral",
+    report_copy: "Report copy",
+    case_manager_report_sent: "Case manager report",
+    rebook_status: "Rebook status",
+    approval_request: "Approval request",
+    running_late: "Running late"
+  }[type] || String(type || "Admin message").replaceAll("_", " ");
+}
+
+function approvalResultMessage(status) {
+  return {
+    waiting: "Admin is waiting for case-manager approval.",
+    approved: "Case-manager approval has been received.",
+    declined: "Case-manager approval was declined."
+  }[status] || "Approval status updated.";
+}
+
+function input(name, label, type = "text", required = false, className = "", value = "") {
+  return `<label class="${className}">
+    ${escapeHtml(label)}
+    <input name="${name}" type="${type}" value="${escapeHtml(value)}" ${required ? "required" : ""}>
+  </label>`;
+}
+
+function companyInput(name, label, value = "", className = "") {
+  return `<label class="${className}">
+    ${escapeHtml(label)}
+    <input name="${name}" type="text" value="${escapeHtml(value)}" list="case-manager-company-options" placeholder="Choose or type company">
+  </label>`;
+}
+
+function renderCompanyDatalist() {
+  const companies = caseManagerCompanies();
+  return `<datalist id="case-manager-company-options">
+    ${companies.map((company) => `<option value="${escapeHtml(company)}"></option>`).join("")}
+  </datalist>`;
+}
+
+function textarea(name, label, className = "", value = "") {
+  return `<label class="${className}">
+    ${escapeHtml(label)}
+    <textarea name="${name}">${escapeHtml(value)}</textarea>
+  </label>`;
+}
+
+function select(name, label, options, selected = "", className = "", id = "", extra = "") {
+  return `<label class="${className}">
+    ${escapeHtml(label)}
+    <select name="${name}" ${id ? `id="${id}"` : ""} ${extra}>
+      ${options.map((option) => {
+        const value = Array.isArray(option) ? option[0] : option;
+        const text = Array.isArray(option) ? option[1] : option;
+        return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(text)}</option>`;
+      }).join("")}
+    </select>
+  </label>`;
+}
+
+function statusPill(text, tone = "") {
+  return `<span class="pill ${tone}">${escapeHtml(String(text || ""))}</span>`;
+}
+
+function emptyState(text) {
+  return `<div class="empty-state">${escapeHtml(text)}</div>`;
+}
+
+function clientName(id) {
+  return state.data.clients.find((client) => client.id === id)?.name || "Unknown client";
+}
+
+function userName(id) {
+  return state.data.users.find((user) => user.id === id)?.name || "Unknown user";
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function formatAppointmentLabel(id) {
+  const appointment = state.data.appointments.find((item) => item.id === id);
+  if (!appointment) return "Unknown appointment";
+  return `${clientName(appointment.clientId)} - ${formatDateTime(appointment.startsAt)}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatAppointmentDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Brisbane",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function fieldKey(label) {
+  return label
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
+function labelFromKey(key) {
+  return String(key)
+    .replace(/([A-Z])/g, " $1")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function offlineKey(appointmentId) {
+  return `refine-note-draft-${appointmentId}`;
+}
+
+function getOfflineDraft(appointmentId) {
+  const raw = localStorage.getItem(offlineKey(appointmentId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function toast(message) {
+  const existing = document.querySelector(".toast");
+  if (existing) existing.remove();
+  const element = document.createElement("div");
+  element.className = "toast";
+  element.textContent = message;
+  document.body.appendChild(element);
+  window.setTimeout(() => element.remove(), 2600);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
