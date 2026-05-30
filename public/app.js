@@ -715,20 +715,6 @@ function renderAdminOverview() {
         <span>Notes not completed</span>
       </article>
     </section>
-    <div class="overview-board">
-      <section class="section overview-panel">
-        <div class="section-heading"><h3>Reports still due</h3><span>${reportsDue.length} incomplete</span></div>
-        <div class="overview-list">
-          ${reportsDue.map(renderAdminReportDueCard).join("") || emptyState("No reports are due.")}
-        </div>
-      </section>
-      <section class="section overview-panel">
-        <div class="section-heading"><h3>Notes not completed</h3><span>${incompleteNotes.length} due</span></div>
-        <div class="overview-list">
-          ${incompleteNotes.map(renderAdminNoteDueCard).join("") || emptyState("No notes are overdue or due today.")}
-        </div>
-      </section>
-    </div>
   `;
 }
 
