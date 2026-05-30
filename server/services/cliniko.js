@@ -22,9 +22,11 @@ let lastClinikoRequestAt = 0;
 let rateLimitQueue = Promise.resolve();
 
 function config() {
+  const apiKey = String(process.env.CLINIKO_API_KEY || "").trim();
+  const configuredBaseUrl = process.env.CLINIKO_BASE_URL || DEFAULT_BASE_URL;
   return {
-    apiKey: String(process.env.CLINIKO_API_KEY || "").trim(),
-    baseUrl: process.env.CLINIKO_BASE_URL || DEFAULT_BASE_URL,
+    apiKey,
+    baseUrl: clinikoBaseUrlForKey(apiKey, configuredBaseUrl),
     userAgent: process.env.CLINIKO_USER_AGENT || DEFAULT_USER_AGENT,
     pollEnabled: process.env.CLINIKO_POLL_ENABLED === "true",
     pollSeconds: Number(process.env.CLINIKO_POLL_SECONDS || 0),
@@ -49,6 +51,23 @@ function config() {
     noteUploadEnabled: process.env.CLINIKO_NOTE_UPLOAD_ENABLED === "true",
     noteUploadAutoEnabled: process.env.CLINIKO_NOTE_UPLOAD_AUTO_ENABLED === "true"
   };
+}
+
+function clinikoBaseUrlForKey(apiKey, configuredBaseUrl) {
+  const fallback = String(configuredBaseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const shard = clinikoShardFromApiKey(apiKey);
+  if (!shard) return fallback;
+  if (!configuredBaseUrl || isOfficialClinikoBaseUrl(fallback)) return `https://api.${shard}.cliniko.com/v1`;
+  return fallback;
+}
+
+function clinikoShardFromApiKey(apiKey) {
+  const match = String(apiKey || "").trim().match(/-([a-z]{2}\d{1,2})$/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function isOfficialClinikoBaseUrl(value) {
+  return /^https:\/\/api\.[a-z]{2}\d{1,2}\.cliniko\.com\/v1$/i.test(String(value || ""));
 }
 
 export function getClinikoConfig() {

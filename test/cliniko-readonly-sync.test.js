@@ -110,6 +110,26 @@ async function withMockCliniko(mockFetch, run, overrides = {}) {
   }
 }
 
+test("Cliniko config routes official API base URL to the API key shard", async () => {
+  await withMockCliniko(async () => jsonResponse({ links: { next: null } }), async () => {
+    const config = getClinikoConfig();
+    assert.equal(config.baseUrl, "https://api.au4.cliniko.com/v1");
+  }, {
+    CLINIKO_API_KEY: "test-api-key-au4",
+    CLINIKO_BASE_URL: "https://api.au1.cliniko.com/v1"
+  });
+});
+
+test("Cliniko config keeps a non-Cliniko mock base URL during tests", async () => {
+  await withMockCliniko(async () => jsonResponse({ links: { next: null } }), async () => {
+    const config = getClinikoConfig();
+    assert.equal(config.baseUrl, "https://mock.cliniko.test/v1");
+  }, {
+    CLINIKO_API_KEY: "test-api-key-au4",
+    CLINIKO_BASE_URL: "https://mock.cliniko.test/v1"
+  });
+});
+
 test("Cliniko read-only sync imports appointments by practitioner and prevents duplicates", async () => {
   const calls = [];
   const mockFetch = async (input, options = {}) => {
