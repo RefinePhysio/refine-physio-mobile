@@ -478,7 +478,7 @@ export function enabledClinikoBusinessIds(db) {
 function clinikoPractitionerCandidates(db) {
   return (db.users || [])
     .filter((user) => user.role === "contractor" && user.clinikoPractitionerId)
-    .filter((user) => user.syncSource === "cliniko" || user.requiresLoginSetup || user.clinikoUpdatedAt);
+    .filter((user) => user.syncSource === "cliniko" || user.requiresLoginSetup || user.clinikoUpdatedAt || user.clinikoSyncEnabled);
 }
 
 function chooseEnabledClinikoPractitioner(db) {

@@ -604,7 +604,7 @@ test("Cliniko appointment creation syncs app bookings and creates new patients w
 
   await withMockCliniko(mockFetch, async () => {
     const db = {
-      users: [{ id: "practitioner-1", role: "contractor", name: "Ella Mason", clinikoPractitionerId: "201" }],
+      users: [{ id: "practitioner-1", role: "contractor", name: "Ella Mason", clinikoPractitionerId: "201", clinikoSyncEnabled: true }],
       clients: [{ id: "client-1", name: "Ava Taylor", phone: "0400 111 111", address: "12 Jacaranda Street" }],
       appointments: [],
       appointmentTypes: [{ id: "type-1", name: "Initial Physiotherapy Assessment SAH", clinikoAppointmentTypeId: "301" }],
