@@ -1269,12 +1269,18 @@ label {
   margin-top: 12px;
 }
 
-.overview-panel {
-  gap: 10px;
+.overview-action-row {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.overview-priority-panel {
-  margin-bottom: 12px;
+.overview-action-row .overview-compact-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.overview-panel {
+  gap: 10px;
 }
 
 .overview-compact-grid {
@@ -1284,7 +1290,7 @@ label {
 }
 
 .overview-scroll-grid {
-  max-height: 244px;
+  max-height: 360px;
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-gutter: stable;
@@ -5053,9 +5059,10 @@ tr:last-child td {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-.overview-board {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
+  .overview-action-row,
+  .overview-board {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 
   .overview-panel-wide {
     grid-column: 1 / -1;

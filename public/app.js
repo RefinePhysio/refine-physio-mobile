@@ -683,12 +683,20 @@ function renderAdminOverview() {
 
   return `
     ${renderAdminReportReminderBanner(reportReminders)}
-    <section class="section overview-panel overview-priority-panel">
-      <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
-      <div class="overview-compact-grid">
-        ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
-      </div>
-    </section>
+    <div class="overview-action-row">
+      <section class="section overview-panel">
+        <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
+        <div class="overview-compact-grid overview-scroll-grid">
+          ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
+        </div>
+      </section>
+      <section class="section overview-panel">
+        <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
+        <div class="overview-compact-grid overview-scroll-grid overview-review-scroll">
+          ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
+        </div>
+      </section>
+    </div>
     <section class="overview-summary" aria-label="Overview totals">
       <article>
         <strong>${approvalRequests.length}</strong>
@@ -708,12 +716,6 @@ function renderAdminOverview() {
       </article>
     </section>
     <div class="overview-board">
-      <section class="section overview-panel overview-panel-wide">
-        <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
-        <div class="overview-compact-grid overview-scroll-grid">
-          ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
-        </div>
-      </section>
       <section class="section overview-panel">
         <div class="section-heading"><h3>Reports still due</h3><span>${reportsDue.length} incomplete</span></div>
         <div class="overview-list">
