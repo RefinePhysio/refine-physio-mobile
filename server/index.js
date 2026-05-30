@@ -105,6 +105,8 @@ const reportTemplates = [
   }
 ];
 
+const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
+
 const appointmentStatuses = ["booked", "confirmed", "completed", "cancelled", "rescheduled", "no-show"];
 const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "paused", "discharged", "declined"];
 
@@ -2536,6 +2538,7 @@ function renderReportHtml(db, report, options = {}) {
     .photo-grid figure { border: 1px solid #d7e3df; margin: 0; padding: 10px; }
     .photo-grid img { display: block; max-width: 100%; }
     .photo-grid figcaption { color: #5b6a66; font-size: 13px; margin-top: 8px; }
+    .report-closing { font-weight: 700; margin: 32px 0 0; }
     .signature { margin-top: 40px; }
     @media print { main { padding: 0; } button { display: none; } }
   </style>
@@ -2572,6 +2575,7 @@ function renderReportHtml(db, report, options = {}) {
         `).join("")}
       </div>
     ` : ""}
+    <p class="report-closing">${escapeHtml(REPORT_CLOSING_MESSAGE)}</p>
     <p class="signature">Therapist Signature: ${escapeHtml(report.signature || contractor.name || "")}</p>
     ${report.signedAt ? `<p>Signed: ${escapeHtml(new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Brisbane" }).format(new Date(report.signedAt)))}</p>` : ""}
   </main>
@@ -2784,6 +2788,7 @@ function normalizeDesignedSectionsForPages(sections) {
 function designedSignatureSection(context) {
   return {
     title: "Therapist Signature",
+    intro: REPORT_CLOSING_MESSAGE,
     rows: [
       ["Name", context.report.signature || context.contractor.name],
       ["Signed", context.report.signedAt ? formatReportDateTime(context.report.signedAt) : ""]
@@ -2942,7 +2947,9 @@ function selectedEquipmentRecommendationText(fields) {
 
 function estimateDesignedSectionHeight(section) {
   if (section.rows) {
-    return 46 + section.rows
+    const introLines = section.intro ? wrapDesignedText(section.intro, 88) : [];
+    const introHeight = introLines.length ? introLines.length * 14 + 12 : 0;
+    return 46 + introHeight + section.rows
       .filter(([, value]) => String(value || "").trim())
       .reduce((total, [, value]) => total + Math.max(1, wrapPdfText(String(value || ""), 62).length) * 14 + 4, 0);
   }
@@ -2959,6 +2966,15 @@ function drawDesignedSection(page, section, startY) {
   y -= 38;
 
   if (section.rows) {
+    if (section.intro) {
+      const introLines = wrapDesignedText(section.intro, 88);
+      for (const line of introLines) {
+        page.content.push(drawText(line, geometry.x + 14, y, 10, "F2", "26211f"));
+        y -= 14;
+      }
+      y -= 10;
+    }
+
     const rows = section.rows.filter(([, value]) => String(value || "").trim());
     for (const [label, value] of rows) {
       const valueLines = wrapPdfText(String(value || ""), 62);
@@ -3442,6 +3458,8 @@ function reportTextLines(db, report) {
     lines.push("");
   }
 
+  lines.push(...wrapPdfText(REPORT_CLOSING_MESSAGE, 92));
+  lines.push("");
   lines.push(`Therapist Signature: ${report.signature || contractor.name || ""}`);
   if (report.signedAt) lines.push(`Signed: ${report.signedAt}`);
   return lines;
