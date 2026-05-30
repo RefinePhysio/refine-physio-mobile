@@ -2778,13 +2778,13 @@ function renderCliniko() {
           <div class="detail-list">
             <div><strong>Cliniko</strong>Patients, practitioners, appointments, calendars, scheduling</div>
             <div><strong>This portal</strong>Mobile workflow status, notes, report drafts, approval requests, admin review</div>
-            <div><strong>Webhook status</strong>${data.clinikoConfig.webhooksAvailable ? "Webhook-capable" : "Use safe polling"}</div>
+            <div><strong>Live updates</strong>${data.clinikoConfig.webhooksAvailable ? "Webhook-capable" : `Safe polling every ${escapeHtml(pollingIntervalLabel(data.clinikoConfig).replace(" polling", ""))}`}</div>
           </div>
         </article>
         <article class="card">
           <h4>Last sync</h4>
           <p>${data.clinikoSync.lastSyncAt ? formatDateTime(data.clinikoSync.lastSyncAt) : "No live sync yet."}</p>
-          <p>API keys stay server-side in environment variables only. Appointment write-back, note file upload, and report upload are controlled by environment flags after setup is confirmed.</p>
+          <p>Cliniko calendar edits appear after the next polling cycle. API keys stay server-side in environment variables only.</p>
           <div class="meta-row">
             ${data.clinikoConfig.syncStartDate
               ? statusPill(`from ${data.clinikoConfig.syncStartDate}`, "blue")

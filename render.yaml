@@ -37,6 +37,8 @@ services:
         value: Refine Physio Mobile (admin@refinephysio.com.au)
       - key: CLINIKO_POLL_ENABLED
         value: "true"
+      - key: CLINIKO_POLL_SECONDS
+        value: "15"
       - key: CLINIKO_APPOINTMENT_CREATE_ENABLED
         value: "true"
       - key: CLINIKO_APPOINTMENT_WRITE_ENABLED
@@ -52,7 +54,7 @@ services:
       - key: CLINIKO_NOTE_UPLOAD_AUTO_ENABLED
         value: "true"
       - key: CLINIKO_POLL_MINUTES
-        value: "5"
+        value: "1"
       - key: CLINIKO_MIN_REQUEST_INTERVAL_MS
         value: "350"
       - key: CLINIKO_MAX_SYNC_PAGES
