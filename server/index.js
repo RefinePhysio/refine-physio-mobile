@@ -1215,7 +1215,7 @@ function buildBootstrap(db, userId) {
   const isOwner = Boolean(currentUser.isOwner);
   const isReceptionist = currentUser.role === "receptionist";
   const isOperations = isAdmin || isReceptionist;
-  const canUseOwnerWorkspace = isOwner && isOperations;
+  const canUseOwnerWorkspace = isAdmin || (isOwner && isOperations);
   const visibleUsers = isOperations
     ? activeUsers
     : activeUsers.filter((user) => user.role === "admin" || user.id === currentUser.id);
