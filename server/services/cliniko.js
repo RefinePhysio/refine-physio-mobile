@@ -23,7 +23,7 @@ let rateLimitQueue = Promise.resolve();
 
 function config() {
   return {
-    apiKey: process.env.CLINIKO_API_KEY || "",
+    apiKey: String(process.env.CLINIKO_API_KEY || "").trim(),
     baseUrl: process.env.CLINIKO_BASE_URL || DEFAULT_BASE_URL,
     userAgent: process.env.CLINIKO_USER_AGENT || DEFAULT_USER_AGENT,
     pollEnabled: process.env.CLINIKO_POLL_ENABLED === "true",
