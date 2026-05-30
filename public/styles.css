@@ -1243,15 +1243,27 @@ label {
   grid-template-columns: 1fr;
 }
 
-.overview-summary article {
+.overview-summary article,
+.overview-summary-card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+  color: inherit;
+  cursor: pointer;
   display: grid;
   gap: 4px;
   min-height: 82px;
   padding: 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.overview-summary-card:hover,
+.overview-summary-card:focus-visible {
+  border-color: #9ecfde;
+  box-shadow: var(--soft-shadow);
+  transform: translateY(-1px);
 }
 
 .overview-summary strong {
@@ -2401,16 +2413,25 @@ label {
 
 .report-review-dropdown summary {
   align-items: center;
+  background: #f3fbfd;
+  border: 1px solid #c7e5ee;
   border-radius: 6px;
   cursor: pointer;
   display: flex;
   gap: 8px;
   justify-content: space-between;
   list-style: none;
-  padding: 2px 0;
+  min-height: 36px;
+  padding: 7px 9px;
   text-decoration: underline;
   text-decoration-color: rgba(0, 91, 119, 0.35);
   text-underline-offset: 3px;
+}
+
+.report-review-dropdown summary:hover,
+.report-review-dropdown summary:focus-visible {
+  background: #e8f7fb;
+  border-color: #95d4e3;
 }
 
 .report-review-dropdown summary::-webkit-details-marker {
@@ -5491,6 +5512,7 @@ label {
 }
 
 .overview-summary article,
+.overview-summary-card,
 .panel-row,
 .note-context,
 .note-copy-control,
@@ -6013,6 +6035,7 @@ textarea {
 
 .inbox-summary article,
 .overview-summary article,
+.overview-summary-card,
 .patient-stat-grid div {
   border-color: var(--line);
   box-shadow: var(--soft-shadow);

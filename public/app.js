@@ -698,22 +698,22 @@ function renderAdminOverview() {
       </section>
     </div>
     <section class="overview-summary" aria-label="Overview totals">
-      <article>
+      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="inbox">
         <strong>${approvalRequests.length}</strong>
         <span>Approval requests</span>
-      </article>
-      <article>
+      </button>
+      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="adminReports">
         <strong>${reportReminders.length}</strong>
         <span>Reports needing admin</span>
-      </article>
-      <article>
+      </button>
+      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="reports-due">
         <strong>${reportsDue.length}</strong>
         <span>Reports still due</span>
-      </article>
-      <article>
+      </button>
+      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="notes-due">
         <strong>${incompleteNotes.length}</strong>
         <span>Notes not completed</span>
-      </article>
+      </button>
     </section>
   `;
 }
@@ -3718,6 +3718,7 @@ function renderInboxItemCard(item) {
     : `<h4>${escapeHtml(item.title)}</h4>`;
   const reportActions = reportId ? `
     <div class="actions">
+      <button type="button" class="secondary" data-action="open-report" data-id="${escapeHtml(reportId)}">Open report</button>
       <a class="button secondary" href="/api/reports/${escapeHtml(reportId)}/pdf" target="_blank" rel="noreferrer">Download PDF</a>
     </div>
   ` : "";
