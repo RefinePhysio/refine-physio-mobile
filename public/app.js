@@ -683,6 +683,12 @@ function renderAdminOverview() {
 
   return `
     ${renderAdminReportReminderBanner(reportReminders)}
+    <section class="section overview-panel overview-priority-panel">
+      <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
+      <div class="overview-compact-grid">
+        ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
+      </div>
+    </section>
     <section class="overview-summary" aria-label="Overview totals">
       <article>
         <strong>${approvalRequests.length}</strong>
@@ -703,14 +709,8 @@ function renderAdminOverview() {
     </section>
     <div class="overview-board">
       <section class="section overview-panel overview-panel-wide">
-        <div class="section-heading"><h3>Approval requests</h3><span>${approvalRequests.length} active</span></div>
-        <div class="overview-compact-grid">
-          ${approvalRequests.map(renderApprovalCard).join("") || emptyState("No active approval requests.")}
-        </div>
-      </section>
-      <section class="section overview-panel overview-panel-wide">
         <div class="section-heading"><h3>Reports for admin review</h3><span>${reportReviewItems.length} waiting</span></div>
-        <div class="overview-compact-grid">
+        <div class="overview-compact-grid overview-scroll-grid">
           ${reportReviewItems.map(renderInboxItemCard).join("") || emptyState("No signed reports are waiting for admin review.")}
         </div>
       </section>

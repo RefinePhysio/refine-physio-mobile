@@ -1273,10 +1273,21 @@ label {
   gap: 10px;
 }
 
+.overview-priority-panel {
+  margin-bottom: 12px;
+}
+
 .overview-compact-grid {
   align-items: start;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 420px));
   justify-content: start;
+}
+
+.overview-scroll-grid {
+  max-height: 244px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .overview-compact-grid > .empty-state {
