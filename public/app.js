@@ -698,24 +698,6 @@ function renderAdminOverview() {
         </div>
       </section>
     </div>
-    <section class="overview-summary" aria-label="Overview totals">
-      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="inbox">
-        <strong>${approvalRequests.length}</strong>
-        <span>Approval requests</span>
-      </button>
-      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="adminReports">
-        <strong>${reportReminders.length}</strong>
-        <span>Reports needing admin</span>
-      </button>
-      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="reports-due">
-        <strong>${reportsDue.length}</strong>
-        <span>Reports still due</span>
-      </button>
-      <button type="button" class="overview-summary-card" data-action="kpi-nav" data-target="notes-due">
-        <strong>${incompleteNotes.length}</strong>
-        <span>Notes not completed</span>
-      </button>
-    </section>
   `;
 }
 
