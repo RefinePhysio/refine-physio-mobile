@@ -1276,6 +1276,12 @@ function buildBootstrap(db, userId) {
     ? db.treatmentNotes.filter((note) => physioContractorIds.has(note.contractorId) || note.discipline === "Physiotherapy")
     : db.treatmentNotes.filter((note) => note.contractorId === currentUser.id);
   const reports = isOperations ? physioReports : db.reports.filter((report) => report.contractorId === currentUser.id);
+  const treatmentNotesForRole = scrubCaseManagerDetails
+    ? treatmentNotes.map(stripCaseManagerFromTreatmentNote)
+    : treatmentNotes;
+  const reportsForRole = scrubCaseManagerDetails
+    ? reports.map(stripCaseManagerFromReport)
+    : reports;
   const caseManagerApprovalRequests = db.approvalRequests.filter(isCaseManagerApprovalRequest);
   const caseManagerApprovalIds = new Set(caseManagerApprovalRequests.map((request) => request.id));
   const approvalRequests = isOperations
@@ -1313,8 +1319,8 @@ function buildBootstrap(db, userId) {
     referrals: scrubCaseManagerDetails ? referrals.map(stripCaseManagerFromReferral) : referrals,
     appointments,
     archivedAppointments: isOperations ? archivedPhysioAppointments : [],
-    treatmentNotes,
-    reports: scrubCaseManagerDetails ? reports.map(stripCaseManagerFromReport) : reports,
+    treatmentNotes: treatmentNotesForRole,
+    reports: reportsForRole,
     approvalRequests,
     rebookStatuses,
     inboxItems,
@@ -1352,7 +1358,15 @@ function clinikoPractitioners(db) {
 }
 
 function stripCaseManagerFromClient(client = {}) {
-  const { caseManagerId, ...safeClient } = client;
+  const {
+    caseManager,
+    caseManagerId,
+    caseManagerDetails,
+    caseManagerRegisteredNurse,
+    registeredNurse,
+    registeredNurseDetails,
+    ...safeClient
+  } = client;
   return safeClient;
 }
 
@@ -1361,16 +1375,41 @@ function stripCaseManagerFromReferral(referral = {}) {
     caseManager,
     caseManagerId,
     caseManagerDetails,
+    caseManagerRegisteredNurse,
+    registeredNurse,
+    registeredNurseDetails,
     ...safeReferral
   } = referral;
   return safeReferral;
 }
 
+function stripCaseManagerFromTreatmentNote(note = {}) {
+  const {
+    caseManager,
+    caseManagerId,
+    caseManagerDetails,
+    caseManagerRegisteredNurse,
+    registeredNurse,
+    registeredNurseDetails,
+    ...safeNote
+  } = note;
+  return {
+    ...safeNote,
+    fields: stripCaseManagerFields(note.fields || {})
+  };
+}
+
 function stripCaseManagerFromReport(report = {}) {
   const {
+    caseManager,
+    caseManagerId,
+    caseManagerDetails,
+    caseManagerRegisteredNurse,
     caseManagerSentAt,
     caseManagerSentBy,
     caseManagerStatus,
+    registeredNurse,
+    registeredNurseDetails,
     ...safeReport
   } = report;
   return {

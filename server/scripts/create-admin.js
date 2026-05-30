@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { hashPassword, normalizeEmail } from "../services/auth.js";
+import { hashPassword, normalizeEmail, verifyPassword } from "../services/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,12 +65,15 @@ if (!admin) {
 }
 
 const passwordWasGenerated = !suppliedPassword && !admin.passwordHash;
-const shouldSetPassword = Boolean(suppliedPassword) || !admin.passwordHash;
+const passwordMatchesExisting = suppliedPassword && admin.passwordHash
+  ? await verifyPassword(password, admin.passwordHash)
+  : false;
+const shouldSetPassword = !admin.passwordHash || (Boolean(suppliedPassword) && !passwordMatchesExisting);
 if (shouldSetPassword) {
   admin.passwordHash = await hashPassword(password);
-}
-for (const session of db.sessions) {
-  if (session.userId === admin.id && !session.revokedAt) session.revokedAt = new Date().toISOString();
+  for (const session of db.sessions) {
+    if (session.userId === admin.id && !session.revokedAt) session.revokedAt = new Date().toISOString();
+  }
 }
 db.activityLog.push({
   id: `activity-${randomUUID()}`,
