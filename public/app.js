@@ -1417,7 +1417,7 @@ function renderPractitionerCalendar(appointments) {
                 );
                 const unavailableHere = slotHasUnavailableConflict(day.key, slot, 15);
                 return `
-                  <div class="${calendarCellClass(slot)}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+                  <div class="${calendarCellClass(slot)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
                     ${slotAppointments.length
                       ? slotAppointments.map(renderCalendarEvent).join("")
                       : slotUnavailableBlocks.length
@@ -1677,7 +1677,7 @@ function renderRebookSlotCalendar(client) {
 }
 
 function renderRebookSlotCell(day, slot, appointments, client) {
-  const cellClass = calendarCellClass(slot);
+  const cellClass = `${calendarCellClass(slot)} ${day.isToday ? "is-today" : ""}`;
   const slotAppointments = appointments.filter((appointment) =>
     brisbaneDateKey(appointment.startsAt) === day.key
     && appointmentSlotMinutes(appointment) === slot
@@ -1737,6 +1737,7 @@ function renderSchedulerToolbar(title, buttonType = false) {
         <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="-1" aria-label="Previous ${state.calendarMode === "week" ? "week" : "day"}">&lt;</button>
         <input type="date" value="${escapeHtml(selectedDate)}" data-action="calendar-date-input" aria-label="Choose calendar date">
         <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="1" aria-label="Next ${state.calendarMode === "week" ? "week" : "day"}">&gt;</button>
+        <button${typeAttr} class="today-jump" data-action="calendar-today" aria-label="Jump to today's date">Today</button>
       </div>
       <div class="calendar-toggle" aria-label="Calendar view">
         <button${typeAttr} class="${state.calendarMode === "day" ? "active" : ""}" data-action="calendar-mode" data-mode="day">Daily</button>
@@ -1812,7 +1813,7 @@ function renderCalendarHeader(days) {
     <div class="calendar-corner"></div>
     ${days.map((day) => `
       <div class="calendar-day-head ${day.isToday ? "today" : ""}">
-        <strong>${escapeHtml(day.heading)}</strong>
+        <strong>${escapeHtml(day.heading)}${day.isToday ? `<em>Today</em>` : ""}</strong>
         <span>${escapeHtml(practitioner.name)}</span>
       </div>
     `).join("")}
@@ -4621,6 +4622,13 @@ function bindViewEvents() {
 
   document.querySelector("[data-action='calendar-date-input']")?.addEventListener("change", (event) => {
     setCalendarDateKey(event.target.value);
+    render();
+  });
+
+  document.querySelector("[data-action='calendar-today']")?.addEventListener("click", () => {
+    setCalendarDateKey(dateKeyFromParts(brisbaneParts(new Date())));
+    state.calendarMonthOffset = 0;
+    localStorage.setItem("refine-calendar-month-offset", "0");
     render();
   });
 
