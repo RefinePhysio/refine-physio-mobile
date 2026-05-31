@@ -3284,8 +3284,8 @@ label {
 }
 
 .calendar-day-head.today {
-  background: linear-gradient(180deg, #d8f7fb 0%, #f2fdff 100%);
-  box-shadow: inset 0 0 0 2px #14a4bd, 0 8px 22px rgba(20, 164, 189, 0.15);
+  background: #fbfdff;
+  box-shadow: none;
   outline: 0;
   outline-offset: -1px;
 }
@@ -3348,12 +3348,12 @@ label {
 }
 
 .calendar-cell.is-today {
-  background: #effbfc;
-  border-left-color: #9fd9e2;
+  background: #f5f9fb;
+  border-left-color: #d8e5ed;
 }
 
 .calendar-cell.is-today.is-hour {
-  box-shadow: inset 3px 0 0 rgba(20, 164, 189, 0.42);
+  box-shadow: none;
 }
 
 .calendar-cell.is-drop-target {
@@ -5837,7 +5837,8 @@ label {
 }
 
 .calendar-day-head.today {
-  background: linear-gradient(180deg, #d8f7fb 0%, #f2fdff 100%);
+  background: #fbfdff;
+  box-shadow: none;
   outline-color: transparent;
 }
 
@@ -6907,8 +6908,8 @@ h3,
   }
 
   .calendar-day-head.today {
-    background: linear-gradient(180deg, #e6f9fc 0%, #ffffff 100%);
-    box-shadow: inset 0 -3px 0 #18a8c1;
+    background: #ffffff;
+    box-shadow: none;
   }
 
   .calendar-day-head strong {
@@ -6959,8 +6960,8 @@ h3,
   }
 
   .calendar-cell.is-today {
-    background: #fbfeff;
-    border-left-color: #a9dce5;
+    background: #ffffff;
+    border-left-color: #d5e1e8;
   }
 
   .calendar-empty-slot:hover,
