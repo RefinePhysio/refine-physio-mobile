@@ -7370,3 +7370,118 @@ h3,
     white-space: normal;
   }
 }
+
+@media (max-width: 719px) {
+  :root {
+    --slot-height: 32px;
+  }
+
+  .identity-band {
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+  }
+
+  .identity-band h2 {
+    font-size: 1.04rem;
+  }
+
+  .identity-band p {
+    font-size: 0.78rem;
+  }
+
+  .status-strip {
+    gap: 5px;
+  }
+
+  .status-strip .pill,
+  .pill {
+    font-size: 0.68rem;
+    min-height: 26px;
+    padding: 4px 7px;
+  }
+
+  .kpi-grid {
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+
+  .kpi {
+    min-height: 58px;
+    padding: 9px 10px;
+  }
+
+  .kpi strong {
+    font-size: 1.18rem;
+  }
+
+  .kpi span {
+    font-size: 0.72rem;
+    line-height: 1.15;
+    margin-top: 4px;
+  }
+
+  .scheduler-toolbar {
+    gap: 7px;
+  }
+
+  .scheduler-location,
+  .scheduler-practitioner,
+  .calendar-date-nav input,
+  .calendar-date-nav button,
+  .calendar-date-nav .today-jump,
+  .calendar-toggle button {
+    min-height: 42px;
+  }
+
+  .calendar-date-nav {
+    gap: 5px;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
+  .calendar-date-nav .today-jump {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .calendar-toggle {
+    width: 100%;
+  }
+
+  .calendar-toggle button {
+    flex: 1 1 0;
+  }
+
+  .patient-link,
+  .text-link {
+    align-items: center;
+    display: inline-flex;
+    min-height: 36px;
+  }
+
+  .notes-record .text-link,
+  .completed-note-row .text-link {
+    background: #ffffff;
+    border: 1px solid #cfe0ea;
+    border-radius: 8px;
+    justify-content: center;
+    padding: 8px 10px;
+    text-decoration: none;
+  }
+
+  .actions button,
+  .actions a.button,
+  .mini-actions button,
+  .mini-actions a.button,
+  .overview-compact-grid .approval-card .mini-actions button,
+  .overview-compact-grid .inbox-card .mini-actions button,
+  .overview-compact-grid .inbox-card .actions button,
+  .overview-compact-grid .inbox-card .actions a.button {
+    min-height: 42px;
+    padding: 9px 10px;
+  }
+
+  .time-selects select {
+    min-height: 42px;
+  }
+}
