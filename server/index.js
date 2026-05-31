@@ -554,7 +554,7 @@ async function routeApi(req, res, url) {
       config: getClinikoConfig(),
       endpoints: clinikoEndpointSummary(),
       lastSync: db.clinikoSync,
-      locations: db.clinikoLocations || [],
+      locations: visibleClinikoLocations(db),
       practitioners: clinikoPractitioners(db),
       recentSyncLogs: (db.clinikoSyncLogs || []).slice(-20).reverse(),
       recentSyncErrors: (db.syncErrors || []).slice(-20).reverse()
@@ -1018,7 +1018,7 @@ async function routeApi(req, res, url) {
     sendJson(res, 200, {
       clinikoSync: result.sync,
       config: getClinikoConfig(),
-      locations: result.db.clinikoLocations || [],
+      locations: visibleClinikoLocations(result.db),
       practitioners: clinikoPractitioners(result.db)
     });
     return;
@@ -1033,7 +1033,7 @@ async function routeApi(req, res, url) {
     await writeDb(db);
     sendJson(res, 200, {
       location: result.location,
-      locations: result.locations,
+      locations: visibleClinikoLocations(db),
       config: getClinikoConfig()
     });
     return;
@@ -1607,10 +1607,12 @@ function buildBootstrap(db, userId) {
   const isReceptionist = currentUser.role === "receptionist";
   const isOperations = isAdmin || isReceptionist;
   const canUseOwnerWorkspace = isOwner && isOperations;
+  const workspaceContractors = contractorsForActiveClinikoScope(activeUsers);
+  const workspaceContractorIds = new Set(workspaceContractors.map((user) => user.id));
   const visibleUsers = isOperations
-    ? activeUsers
+    ? activeUsers.filter((user) => user.role !== "contractor" || workspaceContractorIds.has(user.id))
     : activeUsers.filter((user) => user.role === "admin" || user.id === currentUser.id);
-  const physioContractorIds = new Set(activeUsers.filter((user) => user.role === "contractor").map((user) => user.id));
+  const physioContractorIds = new Set(workspaceContractors.map((user) => user.id));
   const selectedClinikoBusinessIds = new Set(enabledClinikoBusinessIds(db));
   const selectedClinikoPractitionerIds = new Set(enabledClinikoPractitionerIds(db));
   const physioReferrals = db.referrals.filter((referral) =>
@@ -1685,7 +1687,7 @@ function buildBootstrap(db, userId) {
   return {
     currentUser: currentUserPublic,
     users: visibleUsers.map(publicUser),
-    contractors: (isOperations ? activeUsers.filter((user) => user.role === "contractor") : activeUsers.filter((user) => user.id === currentUser.id)).map(publicUser),
+    contractors: (isOperations ? workspaceContractors : activeUsers.filter((user) => user.id === currentUser.id)).map(publicUser),
     caseManagers: isOperations ? (db.caseManagers || []).filter((item) => item.isActive !== false) : [],
     clients: scrubCaseManagerDetails ? clients.map(stripCaseManagerFromClient) : clients,
     referrals: scrubCaseManagerDetails ? referrals.map(stripCaseManagerFromReferral) : referrals,
@@ -1700,7 +1702,7 @@ function buildBootstrap(db, userId) {
     notifications: canUseOwnerWorkspace ? db.notifications : db.notifications.filter((notificationItem) => notificationItem.userId === currentUser.id),
     activityLog: isOperations ? db.activityLog.slice(-10).reverse() : [],
     appointmentTypes: db.appointmentTypes || [],
-    clinikoLocations: isAdmin ? (db.clinikoLocations || []) : [],
+    clinikoLocations: isAdmin ? visibleClinikoLocations(db) : [],
     clinikoPractitioners: isAdmin ? clinikoPractitioners(db) : [],
     clinikoSyncLogs: isAdmin ? (db.clinikoSyncLogs || []).slice(-20).reverse() : [],
     syncErrors: isAdmin ? (db.syncErrors || []).slice(-20).reverse() : [],
@@ -1734,6 +1736,18 @@ function publicClinikoConfig(isAdmin = false) {
     noteUploadAutoEnabled: current.noteUploadAutoEnabled,
     mode: current.mode
   };
+}
+
+function visibleClinikoLocations(db) {
+  return (db.clinikoLocations || []).filter((location) => !location.clinikoOutOfScope);
+}
+
+function contractorsForActiveClinikoScope(activeUsers = []) {
+  const activeContractors = activeUsers.filter((user) => user.role === "contractor" && !user.clinikoOutOfScope);
+  const activeClinikoContractors = activeContractors.filter((user) =>
+    user.clinikoPractitionerId && user.syncSource === "cliniko"
+  );
+  return activeClinikoContractors.length ? activeClinikoContractors : activeContractors;
 }
 
 function clinikoPractitioners(db) {

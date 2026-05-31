@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createClinikoAppointmentFromApp,
+  enabledClinikoBusinessIds,
   getClinikoConfig,
   syncCliniko,
   uploadReportPdfToCliniko,
@@ -521,6 +522,51 @@ test("Cliniko read-only sync only keeps practitioners from the enabled location"
     await syncCliniko(db);
     assert.deepEqual(db.users.map((user) => user.clinikoPractitionerId), ["202"]);
     assert.equal(db.users.some((user) => user.clinikoPractitionerId === "201"), false);
+  });
+});
+
+test("Cliniko read-only sync automatically scopes to the Refine Physio Mobile location", async () => {
+  const practitionerLocationFetches = [];
+  const mockFetch = async (input) => {
+    const url = new URL(String(input));
+
+    if (url.pathname === "/v1/businesses") {
+      return jsonResponse({
+        businesses: [
+          { links: { self: "https://mock.cliniko.test/v1/businesses/401" }, business_name: "Bowen Hills Clinic" },
+          { links: { self: "https://mock.cliniko.test/v1/businesses/402" }, business_name: "Refine Physio Mobile" },
+          { links: { self: "https://mock.cliniko.test/v1/businesses/403" }, business_name: "Telehealth" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname.endsWith("/practitioners")) {
+      practitionerLocationFetches.push(url.pathname);
+      if (url.pathname === "/v1/businesses/402/practitioners") {
+        return jsonResponse({
+          practitioners: [
+            { links: { self: "https://mock.cliniko.test/v1/practitioners/202" }, first_name: "Noah", last_name: "Patel" }
+          ],
+          links: { next: null }
+        });
+      }
+      return jsonResponse({ practitioners: [], links: { next: null } });
+    }
+
+    if (url.pathname === "/v1/appointment_types") return jsonResponse({ appointment_types: [], links: { next: null } });
+    return jsonResponse({ links: { next: null } });
+  };
+
+  await withMockCliniko(mockFetch, async () => {
+    const db = blankDb();
+    await syncCliniko(db);
+
+    assert.deepEqual(enabledClinikoBusinessIds(db), ["402"]);
+    assert.equal(db.clinikoLocations.find((location) => location.clinikoBusinessId === "402").enabled, true);
+    assert.equal(db.clinikoLocations.find((location) => location.clinikoBusinessId === "401").clinikoOutOfScope, true);
+    assert.deepEqual(practitionerLocationFetches, ["/v1/businesses/402/practitioners"]);
+    assert.deepEqual(db.users.map((user) => user.clinikoPractitionerId), ["202"]);
   });
 });
 

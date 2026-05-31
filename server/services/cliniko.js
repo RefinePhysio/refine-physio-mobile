@@ -432,7 +432,47 @@ function mergeClinikoLocations(db, businesses) {
     }
   }
 
+  applyPreferredClinikoLocationScope(db);
   chooseEnabledClinikoLocation(db);
+}
+
+function applyPreferredClinikoLocationScope(db) {
+  const current = config();
+  if (current.activeBusinessId || current.allowMultipleLocations) return;
+  const locations = db.clinikoLocations || [];
+  const preferredLocations = locations.filter(isPreferredClinikoMobileLocation);
+  if (!preferredLocations.length) {
+    for (const location of locations) {
+      location.clinikoOutOfScope = false;
+    }
+    return;
+  }
+
+  const keep = preferredLocations[0];
+  const now = new Date().toISOString();
+  for (const location of locations) {
+    const isPreferred = location.id === keep.id;
+    location.clinikoOutOfScope = !isPreferred;
+    location.enabled = isPreferred;
+    if (isPreferred) location.enabledAt ||= now;
+    if (!isPreferred) location.disabledAt ||= now;
+  }
+}
+
+function isPreferredClinikoMobileLocation(location = {}) {
+  const value = normaliseLocationText([
+    location.displayName,
+    location.name,
+    location.address
+  ].filter(Boolean).join(" "));
+  return value.includes("refine physio mobile")
+    || value.includes("refine physiotherapy mobile")
+    || value.includes("refine mobile physio")
+    || value.includes("refine mobile physiotherapy");
+}
+
+function normaliseLocationText(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function chooseEnabledClinikoLocation(db) {
@@ -469,6 +509,9 @@ export function updateClinikoLocationEnabled(db, locationId, enabled) {
   ensureCollections(db);
   const location = db.clinikoLocations.find((item) => item.id === locationId || String(item.clinikoBusinessId) === String(locationId));
   if (!location) return { status: 404, error: "Cliniko location not found. Run Sync Now first to import locations." };
+  if (enabled && location.clinikoOutOfScope) {
+    return { status: 400, error: "Only the Refine Physio Mobile Cliniko location can be enabled for this app." };
+  }
 
   const now = new Date().toISOString();
   const current = config();
@@ -491,7 +534,7 @@ export function enabledClinikoBusinessIds(db) {
   const current = config();
   if (current.activeBusinessId) return [String(current.activeBusinessId)];
   return (db.clinikoLocations || [])
-    .filter((location) => location.enabled)
+    .filter((location) => location.enabled && !location.clinikoOutOfScope)
     .map((location) => String(location.clinikoBusinessId))
     .filter(Boolean);
 }
