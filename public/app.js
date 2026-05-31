@@ -5678,13 +5678,28 @@ async function submitReport(event) {
 
 async function submitApproval(event) {
   event.preventDefault();
-  const payload = formPayload(event.currentTarget);
-  await fetchJson("/api/approval-requests", { method: "POST", body: payload });
-  state.approvalAppointmentId = "";
-  state.approvalClientId = "";
-  event.currentTarget.reset();
-  toast("Approval sent");
-  await loadData();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const originalText = submitButton?.textContent || "Send to admin";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Sending...";
+  }
+
+  try {
+    const payload = formPayload(form);
+    const result = await fetchJson("/api/approval-requests", { method: "POST", body: payload });
+    state.approvalAppointmentId = "";
+    state.approvalClientId = "";
+    form.reset();
+    toast(result.alreadySent ? "Approval already sent" : "Approval sent");
+    await loadData();
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalText;
+    }
+  }
 }
 
 async function submitReportReminder(event) {

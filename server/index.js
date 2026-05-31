@@ -798,12 +798,34 @@ async function routeApi(req, res, url) {
       return sendJson(res, 403, { error: "Practitioners can only request approvals for their own clients." });
     }
     const client = db.clients.find((item) => item.id === body.clientId);
+    const contractor = db.users.find((item) => item.id === body.contractorId && item.role === "contractor" && item.isActive !== false);
+    if (!client) return sendJson(res, 400, { error: "Choose a client before sending the approval request." });
+    if (!contractor) return sendJson(res, 400, { error: "Choose a practitioner before sending the approval request." });
     const requestType = body.type || "Approvals needed";
     const approvalNeedType = body.approvalNeedType || requestType;
+    const duplicateRequest = db.approvalRequests.find((item) =>
+      isCaseManagerApprovalRequest(item)
+      && item.contractorId === contractor.id
+      && item.clientId === client.id
+      && (item.approvalNeedType || item.type) === approvalNeedType
+      && !["approved", "declined"].includes(item.status)
+    );
+
+    if (duplicateRequest) {
+      if (body.details) duplicateRequest.details = body.details;
+      duplicateRequest.updatedAt = new Date().toISOString();
+      syncInboxItems(db);
+      notifyOperationsUsers(db, "approval_request", approvalRequestAdminMessage(db, duplicateRequest));
+      logActivity(db, auth.user.id, "resent_approval_request", "approvalRequest", duplicateRequest.id);
+      await writeDb(db);
+      sendJson(res, 200, { ...duplicateRequest, alreadySent: true });
+      return;
+    }
+
     const request = {
       id: `approval-${randomUUID()}`,
-      contractorId: body.contractorId,
-      clientId: body.clientId,
+      contractorId: contractor.id,
+      clientId: client.id,
       appointmentId: "",
       type: requestType,
       approvalNeedType,
@@ -816,10 +838,8 @@ async function routeApi(req, res, url) {
       updatedAt: new Date().toISOString()
     };
     db.approvalRequests.push(request);
-    const message = requestType === "Approvals needed"
-      ? `${contractorName(db, body.contractorId)} needs case-manager approval for ${client?.name || "a client"}: ${approvalNeedType}.`
-      : `${contractorName(db, body.contractorId)} submitted ${request.type}.`;
-    db.notifications.push(notification("admin-jenni", "approval_request", message));
+    syncInboxItems(db);
+    notifyOperationsUsers(db, "approval_request", approvalRequestAdminMessage(db, request));
     logActivity(db, auth.user.id, "created_approval_request", "approvalRequest", request.id);
     await writeDb(db);
     sendJson(res, 201, request);
@@ -2534,6 +2554,32 @@ function notification(userId, type, message) {
     read: false,
     createdAt: new Date().toISOString()
   };
+}
+
+function operationsUsers(db) {
+  return (db.users || []).filter((user) =>
+    user.isActive !== false && ["admin", "receptionist"].includes(user.role)
+  );
+}
+
+function notifyOperationsUsers(db, type, message) {
+  for (const user of operationsUsers(db)) {
+    const alreadyUnread = (db.notifications || []).some((item) =>
+      item.userId === user.id && item.type === type && item.message === message && !item.read
+    );
+    if (alreadyUnread) continue;
+    db.notifications.push(notification(user.id, type, message));
+  }
+}
+
+function approvalRequestAdminMessage(db, request) {
+  const client = db.clients.find((item) => item.id === request.clientId);
+  const contractor = db.users.find((item) => item.id === request.contractorId);
+  const requestType = request.type || "Approvals needed";
+  const approvalNeedType = request.approvalNeedType || requestType;
+  return requestType === "Approvals needed"
+    ? `${contractor?.name || "A practitioner"} needs case-manager approval for ${client?.name || "a client"}: ${approvalNeedType}.`
+    : `${contractor?.name || "A practitioner"} submitted ${requestType}.`;
 }
 
 function markNotificationsRead(db, body) {
