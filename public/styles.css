@@ -4052,7 +4052,11 @@ label {
   color: var(--brand-dark);
 }
 
-.patient-file-tabs span {
+.patient-file-select-control {
+  display: none;
+}
+
+.patient-file-tabs button .patient-file-tab-badge {
   background: #d9eaf4;
   border-radius: 999px;
   color: var(--brand-dark);
@@ -7046,6 +7050,43 @@ h3,
   }
 
   .tabs .tab.active {
+    display: none;
+  }
+}
+
+@media (max-width: 719px) {
+  .patient-file-tabs {
+    display: block;
+    overflow: visible;
+    padding: 8px;
+  }
+
+  .patient-file-select-control {
+    display: grid;
+    gap: 5px;
+    width: 100%;
+  }
+
+  .patient-file-select-control span {
+    color: #52697b;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .patient-file-select-control select {
+    background: #ffffff;
+    border: 1px solid #bed7e5;
+    border-radius: 8px;
+    color: #102f42;
+    font-weight: 850;
+    min-height: 42px;
+    padding: 8px 10px;
+    width: 100%;
+  }
+
+  .patient-file-tabs > button {
     display: none;
   }
 }

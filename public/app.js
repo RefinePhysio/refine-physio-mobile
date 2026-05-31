@@ -3134,12 +3134,30 @@ function patientFileViewLabel(view) {
 }
 
 function renderPatientFileNav(activeView, appointmentCount, noteCount, reportCount) {
+  const items = [
+    { id: "details", label: "Details" },
+    { id: "appointments", label: "Appointments", count: appointmentCount },
+    { id: "notes", label: "Notes", count: noteCount },
+    { id: "reports", label: "Reports", count: reportCount }
+  ];
   return `
     <nav class="patient-file-tabs" aria-label="Patient file sections">
-      <button type="button" class="${activeView === "details" ? "active" : ""}" data-action="patient-file-view" data-view="details">Details</button>
-      <button type="button" class="${activeView === "appointments" ? "active" : ""}" data-action="patient-file-view" data-view="appointments">Appointments <span>${appointmentCount}</span></button>
-      <button type="button" class="${activeView === "notes" ? "active" : ""}" data-action="patient-file-view" data-view="notes">Notes <span>${noteCount}</span></button>
-      <button type="button" class="${activeView === "reports" ? "active" : ""}" data-action="patient-file-view" data-view="reports">Reports <span>${reportCount}</span></button>
+      <label class="patient-file-select-control">
+        <span>Section</span>
+        <select data-action="patient-file-view-select" aria-label="Choose patient file section">
+          ${items.map((item) => `
+            <option value="${escapeHtml(item.id)}" ${activeView === item.id ? "selected" : ""}>
+              ${escapeHtml(item.label)}${typeof item.count === "number" ? ` (${item.count})` : ""}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+      ${items.map((item) => `
+        <button type="button" class="${activeView === item.id ? "active" : ""}" data-action="patient-file-view" data-view="${escapeHtml(item.id)}">
+          ${escapeHtml(item.label)}
+          ${typeof item.count === "number" ? `<span class="patient-file-tab-badge">${item.count}</span>` : ""}
+        </button>
+      `).join("")}
     </nav>
   `;
 }
@@ -4456,6 +4474,11 @@ function bindViewEvents() {
       state.patientFileView = button.dataset.view || "details";
       render();
     });
+  });
+
+  document.querySelector("[data-action='patient-file-view-select']")?.addEventListener("change", (event) => {
+    state.patientFileView = event.target.value || "details";
+    render();
   });
 
   document.querySelectorAll("[data-action='patient-file-close']").forEach((button) => {
