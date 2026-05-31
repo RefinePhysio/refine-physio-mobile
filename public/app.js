@@ -1514,16 +1514,24 @@ function renderRebook() {
   }
 
   if (selectedRebookClient) {
+    if (state.rebookSelectedStartLocal) {
+      return `
+        <section class="section rebook-focus-section">
+          <div class="rebook-confirm-stage">
+            ${renderRebookInstructionCard(selectedRebookClient)}
+            <div class="rebook-booking-inline" role="dialog" aria-label="Create rebooking">
+              ${renderRebookAppointmentForm(data, selectedRebookClient)}
+            </div>
+          </div>
+        </section>
+      `;
+    }
+
     return `
       <section class="section rebook-focus-section">
         <div class="rebook-calendar-stage">
           ${renderRebookInstructionCard(selectedRebookClient)}
           ${renderRebookSlotCalendar(selectedRebookClient)}
-          ${state.rebookSelectedStartLocal ? `
-            <div class="rebook-booking-popover" role="dialog" aria-label="Create rebooking">
-              ${renderRebookAppointmentForm(data, selectedRebookClient)}
-            </div>
-          ` : ""}
         </div>
       </section>
     `;
@@ -7369,7 +7377,7 @@ function focusRebookCalendar() {
 
 function focusRebookForm() {
   window.setTimeout(() => {
-    document.querySelector(".rebook-booking-popover")?.scrollIntoView({ block: "nearest" });
+    document.querySelector(".rebook-booking-inline, .rebook-booking-popover")?.scrollIntoView({ block: "nearest" });
   }, 0);
 }
 

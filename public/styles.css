@@ -2411,6 +2411,20 @@ label {
   position: relative;
 }
 
+.rebook-confirm-stage {
+  display: grid;
+  gap: 12px;
+  margin: 0 auto;
+  max-width: 720px;
+  min-width: 0;
+}
+
+.rebook-booking-inline {
+  margin: 0 auto;
+  max-width: 560px;
+  width: 100%;
+}
+
 .rebook-instruction-card {
   align-items: center;
   background: #f5fbfd;
