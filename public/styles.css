@@ -2728,6 +2728,21 @@ label {
   min-height: 76px;
 }
 
+.outcome-table .ai-textarea-field {
+  gap: 5px;
+  margin: 0;
+}
+
+.outcome-table .ai-field-header {
+  gap: 6px;
+}
+
+.outcome-table .ai-polish-button {
+  font-size: 0.76rem;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
 .normative-panel {
   background: #fffaf0;
   border: 1px solid #f0d7a9;

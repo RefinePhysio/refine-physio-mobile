@@ -1174,7 +1174,7 @@ async function polishReportSectionWithOpenAI(body = {}) {
     return { status: 409, error: "AI rewriting is not connected yet. Add OPENAI_API_KEY in Render environment variables first." };
   }
 
-  const section = aiReportSectionConfig(body.sectionType);
+  const section = aiReportSectionConfig(body.sectionType, body.sectionLabel);
   if (!section) {
     return { status: 400, error: "This report section is not set up for AI rewriting." };
   }
@@ -1251,8 +1251,8 @@ async function polishReportSectionWithOpenAI(body = {}) {
   }
 }
 
-function aiReportSectionConfig(sectionType) {
-  return {
+function aiReportSectionConfig(sectionType, sectionLabel = "") {
+  const configured = {
     subjective: {
       type: "subjective",
       label: "Subjective",
@@ -1284,6 +1284,14 @@ function aiReportSectionConfig(sectionType) {
       guidance: "Rewrite the supplied equipment trial summary dot points into a concise report-ready summary. Do not invent trial outcomes, equipment details, recommendations, funding details, or safety issues that were not supplied."
     }
   }[String(sectionType || "").trim()];
+  if (configured) return configured;
+
+  const label = String(sectionLabel || sectionType || "Report section").trim();
+  return {
+    type: String(sectionType || "genericReportSection").trim() || "genericReportSection",
+    label,
+    guidance: `Rewrite the supplied notes for the ${label} section into clear report-ready wording. Do not invent clinical findings, recommendations, equipment, funding details, risks, diagnoses, timeframes, or follow-up actions that were not supplied.`
+  };
 }
 
 function aiReportInstructions(section, reportType = "") {

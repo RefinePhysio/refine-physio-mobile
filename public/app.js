@@ -2307,7 +2307,7 @@ function renderOutcomeMeasureTable(measures, fields = {}) {
                 <td data-label="Outcome measure"><strong>${escapeHtml(measure.label)}</strong></td>
                 <td data-label="Score / details"><textarea name="field_outcome_${measure.id}_details">${escapeHtml(fields[`outcome_${measure.id}_details`] || "")}</textarea></td>
                 <td data-label="Normative / reference value"><textarea name="field_outcome_${measure.id}_normativeValue">${escapeHtml(normativeValue)}</textarea></td>
-                <td data-label="Clinical note"><textarea name="field_outcome_${measure.id}_clinicalNote">${escapeHtml(fields[`outcome_${measure.id}_clinicalNote`] || "")}</textarea></td>
+                <td data-label="Clinical note">${aiTextarea(`field_outcome_${measure.id}_clinicalNote`, "Clinical note", "", fields[`outcome_${measure.id}_clinicalNote`] || "", "outcomeClinicalNote")}</td>
               </tr>
             `;
           }).join("")}
@@ -2390,12 +2390,12 @@ function renderReports() {
         ${selectedAppointment ? `<div class="pill blue full">Linked to ${escapeHtml(formatAppointmentLabel(selectedAppointment.id))}</div>` : ""}
         ${isEquipmentTrialReport(state.reportType)
           ? aiTextarea("summary", "Summary", "full", reportSummary, "equipmentSummary")
-          : textarea("summary", "Summary", "full", reportSummary)}
+          : aiTextarea("summary", "Summary", "full", reportSummary, "summary")}
         ${isInitialPhysioReport(state.reportType)
           ? renderInitialPhysioReportFields(selectedAppointment, reportFieldsValue)
           : isEquipmentTrialReport(state.reportType)
           ? renderEquipmentTrialReportFields(reportFieldsValue)
-          : reportFields.map((field) => textarea(`field_${fieldKey(field)}`, field, "full", reportFieldsValue[fieldKey(field)] || "")).join("")}
+          : reportFields.map((field) => aiTextarea(`field_${fieldKey(field)}`, field, "full", reportFieldsValue[fieldKey(field)] || "", fieldKey(field))).join("")}
         ${renderReportSignaturePanel(selectedContractor, existingReport)}
         <div class="form-actions full">
           <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
@@ -2460,9 +2460,9 @@ function renderInitialPhysioReportFields(appointment, fields = {}) {
 
   return `
     <div class="pill blue full">Initial physiotherapy assessment structure</div>
-    ${textarea("field_reasonForReferral", "Reason for referral", "full", fields.reasonForReferral || (appointment ? appointmentReasonForReferral(appointment) : ""))}
-    ${textarea("field_medicalHistory", "Medical history", "full", fields.medicalHistory || client.diagnosis || "")}
-    ${textarea("field_currentHomeSetUp", "Current home set up", "full", fields.currentHomeSetUp || "")}
+    ${aiTextarea("field_reasonForReferral", "Reason for referral", "full", fields.reasonForReferral || (appointment ? appointmentReasonForReferral(appointment) : ""), "reasonForReferral")}
+    ${aiTextarea("field_medicalHistory", "Medical history", "full", fields.medicalHistory || client.diagnosis || "", "medicalHistory")}
+    ${aiTextarea("field_currentHomeSetUp", "Current home set up", "full", fields.currentHomeSetUp || "", "currentHomeSetUp")}
     ${aiTextarea("field_subjective", "Subjective", "full", fields.subjective || "", "subjective")}
     <section class="clinical-block full">
       <div class="section-heading">
@@ -2472,7 +2472,7 @@ function renderInitialPhysioReportFields(appointment, fields = {}) {
       ${aiTextarea("field_objectiveObservations", "Objective observations", "full", fields.objectiveObservations || "", "objective")}
       ${renderOutcomeMeasurePicker(selectedMeasures)}
       <div id="custom-outcome-wrap" class="${selectedMeasures.includes("other") ? "full" : "full hidden"}">
-        ${textarea("field_customOutcomeMeasures", "Other outcome measures", "full", fields.customOutcomeMeasures || "")}
+        ${aiTextarea("field_customOutcomeMeasures", "Other outcome measures", "full", fields.customOutcomeMeasures || "", "outcomeMeasures")}
       </div>
       <div id="outcome-measure-table-wrap">
         ${renderOutcomeMeasureTable(allMeasures, fields)}
@@ -2481,11 +2481,11 @@ function renderInitialPhysioReportFields(appointment, fields = {}) {
         ${renderNormativeValues(allMeasures)}
       </div>
     </section>
-    ${textarea("field_assessment", "Assessment", "full", fields.assessment || "")}
-    ${textarea("field_treatment", "Treatment", "full", fields.treatment || "")}
+    ${aiTextarea("field_assessment", "Assessment", "full", fields.assessment || "", "assessment")}
+    ${aiTextarea("field_treatment", "Treatment", "full", fields.treatment || "", "treatment")}
     ${aiTextarea("field_recommendations", "Recommendations", "full", fields.recommendations || "", "recommendations")}
     ${renderReportPhotoAttachments(fields)}
-    ${textarea("field_plan", "Plan", "full", fields.plan || "")}
+    ${aiTextarea("field_plan", "Plan", "full", fields.plan || "", "plan")}
   `;
 }
 
@@ -2592,7 +2592,7 @@ function renderEquipmentRecommendations(fields = {}) {
         ${renderChosenModelRecommendations(fields)}
       </div>
       ${aiTextarea("field_equipmentAdditionalRecommendations", "Additional recommendations", "full", fields.equipmentAdditionalRecommendations || "", "equipmentRecommendations")}
-      ${textarea("field_equipmentPlan", "Plan", "full", fields.equipmentPlan || "")}
+      ${aiTextarea("field_equipmentPlan", "Plan", "full", fields.equipmentPlan || "", "equipmentPlan")}
     </section>
   `;
 }
@@ -5811,18 +5811,19 @@ async function polishReportSectionWithAi(button) {
       body: {
         text: rawText,
         sectionType: button.dataset.sectionType || textareaEl.dataset.aiSection || "",
+        sectionLabel: button.dataset.sectionLabel || textareaEl.dataset.aiLabel || "",
         reportType: form?.querySelector("select[name='type']")?.value || state.reportType || ""
       }
     });
     textareaEl.value = result.text || rawText;
     textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
     preserveReportDraft();
-    toast("AI paragraph added");
+    toast("Polished with AI");
   } catch (error) {
     toast(error.message || "AI rewrite failed");
   } finally {
     button.disabled = false;
-    button.textContent = originalText || "AI paragraph";
+    button.textContent = originalText || "Polish with AI";
     textareaEl.focus();
   }
 }
@@ -8404,12 +8405,13 @@ function textarea(name, label, className = "", value = "") {
 
 function aiTextarea(name, label, className = "", value = "", sectionType = "") {
   const id = `ai-${String(name).replace(/[^a-z0-9_-]/gi, "-")}`;
+  const aiSectionType = sectionType || fieldKey(label);
   return `<label class="${className} ai-textarea-field" for="${id}">
     <span class="ai-field-header">
       <span>${escapeHtml(label)}</span>
-      <button type="button" class="secondary ai-polish-button" data-action="ai-polish-section" data-target="${escapeHtml(id)}" data-section-type="${escapeHtml(sectionType)}">AI paragraph</button>
+      <button type="button" class="secondary ai-polish-button" data-action="ai-polish-section" data-target="${escapeHtml(id)}" data-section-type="${escapeHtml(aiSectionType)}" data-section-label="${escapeHtml(label)}">Polish with AI</button>
     </span>
-    <textarea id="${id}" name="${name}" data-ai-section="${escapeHtml(sectionType)}">${escapeHtml(value)}</textarea>
+    <textarea id="${id}" name="${name}" data-ai-section="${escapeHtml(aiSectionType)}" data-ai-label="${escapeHtml(label)}">${escapeHtml(value)}</textarea>
   </label>`;
 }
 
