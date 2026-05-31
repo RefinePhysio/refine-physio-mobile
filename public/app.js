@@ -488,6 +488,7 @@ async function markVisibleMessagesRead() {
 
 function visibleMessageThreadUserId() {
   if (!state.data?.currentUser) return "";
+  if (ownerViewingPractitioner()) return "";
   if (state.data.currentUser.role === "contractor") return adminUser()?.id || "";
   const users = messageThreadUsers();
   return selectedMessageThreadUser(users)?.id || "";
@@ -5524,12 +5525,22 @@ async function submitReportReminder(event) {
 
 async function submitMessage(event) {
   event.preventDefault();
-  const payload = formPayload(event.currentTarget);
-  await fetchJson("/api/messages", { method: "POST", body: payload });
-  event.currentTarget.reset();
-  setActiveTab("messages");
-  toast("Message sent");
-  await loadData();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const payload = formPayload(form);
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    await fetchJson("/api/messages", { method: "POST", body: payload });
+    form.reset();
+    setActiveTab("messages");
+    toast("Message sent");
+    await loadData();
+  } catch (error) {
+    toast(error.message || "Could not send message");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 }
 
 async function submitRunningLate(event) {
@@ -6336,7 +6347,11 @@ function unreadMessagesFromUser(userId) {
 }
 
 function adminUser() {
-  return state.data.users.find((user) => user.role === "admin") || null;
+  const admins = (state.data.users || []).filter((user) => user.role === "admin" && user.isActive !== false);
+  return admins.find((user) => user.isOwner)
+    || admins.find((user) => String(user.email || "").toLowerCase().includes("@refinehealthgroup.com.au"))
+    || admins[0]
+    || null;
 }
 
 function sortMessages(messages) {
