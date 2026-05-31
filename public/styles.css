@@ -3938,6 +3938,60 @@ label {
   gap: 8px;
 }
 
+.appointment-action-group {
+  display: grid;
+  gap: 8px;
+}
+
+.appointment-action-label {
+  color: #55727a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.appointment-action-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.appointment-more-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.appointment-more-actions summary {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cbd9e0;
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font-weight: 850;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 9px 12px;
+}
+
+.appointment-more-actions summary::after {
+  content: "+";
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.appointment-more-actions[open] summary::after {
+  content: "-";
+}
+
+.appointment-more-actions > div {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .appointment-modal-actions button,
 .appointment-modal-actions a.button {
   justify-content: space-between;
@@ -4996,10 +5050,34 @@ tr:last-child td {
     background: #f7fbfd;
     border-top: 1px solid #dce8ef;
     display: grid;
-    gap: 6px;
-    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    grid-template-columns: 1fr;
     margin: 2px -12px -12px;
     padding: 9px 11px 11px;
+  }
+
+  .appointment-detail-modal .appointment-action-group {
+    background: #ffffff;
+    border: 1px solid #dbe8ef;
+    border-radius: 10px;
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .appointment-detail-modal .appointment-action-main {
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+
+  .appointment-detail-modal .appointment-action-travel {
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+
+  .appointment-detail-modal .appointment-action-row {
+    gap: 7px;
   }
 
   .appointment-detail-modal .appointment-modal-actions button,
@@ -5013,6 +5091,33 @@ tr:last-child td {
     min-height: 38px;
     padding: 7px 8px;
     text-align: center;
+  }
+
+  .appointment-detail-modal .appointment-modal-actions .appointment-primary-action {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: #ffffff;
+    font-size: 0.9rem;
+    font-weight: 900;
+    min-height: 44px;
+  }
+
+  .appointment-detail-modal .appointment-more-actions {
+    background: #ffffff;
+    border: 1px solid #dbe8ef;
+    border-radius: 10px;
+    padding: 8px;
+  }
+
+  .appointment-detail-modal .appointment-more-actions summary {
+    background: #f8fcfd;
+    border-color: #d6e7ef;
+    font-size: 0.86rem;
+    min-height: 40px;
+  }
+
+  .appointment-detail-modal .appointment-more-actions > div {
+    grid-template-columns: 1fr;
   }
 
   .appointment-detail-modal .appointment-modal-actions button:hover,
@@ -6444,6 +6549,12 @@ textarea {
 .appointment-modal-actions button,
 .appointment-modal-actions a.button {
   justify-content: flex-start;
+}
+
+.appointment-modal-actions .appointment-action-row button,
+.appointment-modal-actions .appointment-action-row a.button,
+.appointment-modal-actions .appointment-primary-action {
+  justify-content: center;
 }
 
 .patient-file-tabs button,

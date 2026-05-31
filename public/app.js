@@ -3477,14 +3477,30 @@ function renderAppointmentDetailModal() {
           </section>
 
           <aside class="appointment-modal-actions" aria-label="Appointment actions">
-            <button type="button" class="${appointmentStatusButtonClass(appointment, "completed")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="completed">Arrived</button>
-            <button type="button" class="${appointmentStatusButtonClass(appointment, "no-show")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="no-show">Did not arrive</button>
-            ${readOnly ? "" : `<button type="button" class="secondary" data-action="appointment-reschedule" data-id="${escapeHtml(appointment.id)}">Edit</button>`}
-            ${renderDirectionsLink(appointmentAddress)}
-            <button type="button" class="secondary" data-action="rebook-appointment" data-id="${escapeHtml(appointment.id)}" data-client-id="${escapeHtml(appointment.clientId)}">Rebook</button>
-            ${showTreatmentNote ? `<button type="button" data-action="open-note" data-id="${escapeHtml(appointment.id)}">Notes</button>` : ""}
-            ${showReport ? `<button type="button" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Report</button>` : ""}
-            <button type="button" class="secondary archive-button" data-action="appointment-archive" data-id="${escapeHtml(appointment.id)}">Archive</button>
+            ${showTreatmentNote || showReport ? `
+              <div class="appointment-action-group appointment-action-main">
+                ${showTreatmentNote ? `<button type="button" class="appointment-primary-action" data-action="open-note" data-id="${escapeHtml(appointment.id)}">Open notes</button>` : ""}
+                ${showReport ? `<button type="button" class="appointment-primary-action" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Open report</button>` : ""}
+              </div>
+            ` : ""}
+            <div class="appointment-action-group appointment-action-attendance">
+              <span class="appointment-action-label">Attendance</span>
+              <div class="appointment-action-row">
+                <button type="button" class="${appointmentStatusButtonClass(appointment, "completed")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="completed">Arrived</button>
+                <button type="button" class="${appointmentStatusButtonClass(appointment, "no-show")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="no-show">Did not arrive</button>
+              </div>
+            </div>
+            <div class="appointment-action-group appointment-action-travel">
+              ${renderDirectionsLink(appointmentAddress)}
+            </div>
+            <details class="appointment-more-actions">
+              <summary>More options</summary>
+              <div>
+                ${readOnly ? "" : `<button type="button" class="secondary" data-action="appointment-reschedule" data-id="${escapeHtml(appointment.id)}">Edit appointment</button>`}
+                <button type="button" class="secondary" data-action="rebook-appointment" data-id="${escapeHtml(appointment.id)}" data-client-id="${escapeHtml(appointment.clientId)}">Rebook</button>
+                <button type="button" class="secondary archive-button" data-action="appointment-archive" data-id="${escapeHtml(appointment.id)}">Archive</button>
+              </div>
+            </details>
           </aside>
         </div>
         ${lastUpdatedAt ? `<footer class="appointment-modal-footer">Last updated ${escapeHtml(formatDateTime(lastUpdatedAt))}</footer>` : ""}
