@@ -2359,6 +2359,7 @@ function normalizeReportPhotoAttachments(value) {
       width: clampNumber(photo.width, 1, 5000, 1200),
       height: clampNumber(photo.height, 1, 5000, 900),
       dataUrl: String(photo.dataUrl || "").slice(0, 2200000),
+      note: String(photo.note || "").slice(0, 600),
       addedAt: String(photo.addedAt || "").slice(0, 40)
     }))
     .filter((photo) => photo.dataUrl.length < 2200000);
@@ -2821,6 +2822,7 @@ function renderReportHtml(db, report, options = {}) {
     .photo-grid figure { border: 1px solid #d7e3df; margin: 0; padding: 10px; }
     .photo-grid img { display: block; max-width: 100%; }
     .photo-grid figcaption { color: #5b6a66; font-size: 13px; margin-top: 8px; }
+    .photo-grid figure p { color: #17211f; font-size: 14px; margin: 8px 0 0; white-space: pre-wrap; }
     .report-closing { font-weight: 700; margin: 32px 0 0; }
     .signature { display: grid; gap: 3px; margin-top: 10px; }
     .signature img { display: block; height: auto; max-height: 70px; max-width: 210px; object-fit: contain; }
@@ -2856,6 +2858,7 @@ function renderReportHtml(db, report, options = {}) {
           <figure>
             <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(`Photo ${index + 1}`)}">
             <figcaption>${escapeHtml(`Photo ${index + 1}${photo.name ? ` - ${photo.name}` : ""}`)}</figcaption>
+            ${photo.note ? `<p>${escapeHtml(photo.note)}</p>` : ""}
           </figure>
         `).join("")}
       </div>
@@ -3556,12 +3559,19 @@ function designedReportPhotoPages(context) {
 
     const name = `Photo${index + 1}`;
     page.images.push({ pdfName: name, buffer: photo.buffer, width: photo.width, height: photo.height });
-    const placement = fitImage(photo.width, photo.height, 420, 230);
+    const noteLines = photo.note ? wrapDesignedText(photo.note, 78).slice(0, 3) : [];
+    const placement = fitImage(photo.width, photo.height, 420, noteLines.length ? 188 : 220);
     const x = 88 + (420 - placement.width) / 2;
     page.content.push(drawRect(78, y - 14, 440, 260, "f7f3ef"));
     page.content.push(drawText(`${index + 1}`, 92, y + 215, 18, "F2", "16aee5"));
     page.content.push(drawText(photo.name || `Photo ${index + 1}`, 118, y + 220, 11, "F2", "26211f"));
-    page.content.push(drawImage(name, x, y, placement.width, placement.height));
+    page.content.push(drawImage(name, x, y + (noteLines.length ? 48 : 8), placement.width, placement.height));
+    if (noteLines.length) {
+      page.content.push(drawText("Notes:", 92, y + 25, 9, "F2", "087f9a"));
+      noteLines.forEach((line, lineIndex) => {
+        page.content.push(drawText(line, 132, y + 25 - lineIndex * 12, 9, "F1", "26211f"));
+      });
+    }
     y -= 308;
     photosOnPage += 1;
   });
@@ -3783,6 +3793,7 @@ function reportTextLines(db, report) {
     lines.push("Attached Photos");
     reportPhotoAttachmentsFromFields(report.fields || {}).forEach((photo, index) => {
       lines.push(`${index + 1}. ${photo.name || `Photo ${index + 1}`}`);
+      if (photo.note) lines.push(...wrapPdfText(`Notes: ${photo.note}`, 92));
     });
     lines.push("");
   }
@@ -3858,17 +3869,29 @@ function renderSimplePdf(lines, photoAttachments = []) {
 
     const placement = pdfImagePlacement(photo.width, photo.height);
     const caption = sanitizePdfText(`Photo ${index + 1}: ${photo.name || "Camera photo"}`);
+    const noteLines = photo.note ? wrapPdfText(`Notes: ${photo.note}`, 82).slice(0, 4).map(sanitizePdfText) : [];
     const content = [
       "BT",
       "/F1 12 Tf",
       "50 790 Td",
       `(${escapePdfText(caption)}) Tj`,
       "ET",
-      "BT",
-      "/F1 9 Tf",
-      "50 770 Td",
-      `(${escapePdfText("Included with the signed initial physiotherapy report.")}) Tj`,
-      "ET",
+      ...(noteLines.length
+        ? [
+          "BT",
+          "/F1 9 Tf",
+          "50 770 Td",
+          "11 TL",
+          ...noteLines.flatMap((line) => [`(${escapePdfText(line)}) Tj`, "T*"]),
+          "ET"
+        ]
+        : [
+          "BT",
+          "/F1 9 Tf",
+          "50 770 Td",
+          `(${escapePdfText("Included with the signed initial physiotherapy report.")}) Tj`,
+          "ET"
+        ]),
       "q",
       `${placement.width} 0 0 ${placement.height} ${placement.x} ${placement.y} cm`,
       "/Im1 Do",
@@ -3910,6 +3933,7 @@ function pdfImageAttachments(photoAttachments = []) {
       if (!buffer.length) return null;
       return {
         name: photo.name || "Photo",
+        note: photo.note || "",
         width: photo.width || 1200,
         height: photo.height || 900,
         buffer

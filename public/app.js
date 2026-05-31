@@ -2572,6 +2572,10 @@ function renderReportPhotoAttachments(fields = {}) {
                   <strong>${escapeHtml(`Photo ${index + 1}`)}</strong>
                   <span>${escapeHtml(photo.name || "Camera photo")} · ${escapeHtml(reportPhotoSizeLabel(photo))}</span>
                 </div>
+                <label class="report-photo-note">
+                  Notes for this photo
+                  <textarea data-action="report-photo-note" data-index="${index}" rows="3" placeholder="Add photo notes for the PDF">${escapeHtml(photo.note || "")}</textarea>
+                </label>
                 <button type="button" class="secondary" data-action="remove-report-photo" data-index="${index}">Remove</button>
               </article>
             `).join("")}
@@ -5160,6 +5164,12 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='report-photo-note']").forEach((textareaEl) => {
+    textareaEl.addEventListener("input", () => {
+      updateReportPhotoNote(Number(textareaEl.dataset.index), textareaEl.value);
+    });
+  });
+
   document.querySelectorAll("[data-action='ai-polish-section']").forEach((button) => {
     button.addEventListener("click", () => {
       void polishReportSectionWithAi(button);
@@ -5957,6 +5967,7 @@ function reportPhotoAttachmentsFromFields(fields = {}) {
       width: Number(photo.width || 0),
       height: Number(photo.height || 0),
       dataUrl: String(photo.dataUrl || "").slice(0, REPORT_PHOTO_MAX_DATA_URL_LENGTH),
+      note: String(photo.note || "").slice(0, 600),
       addedAt: photo.addedAt || ""
     }))
     .filter((photo) => photo.dataUrl.length < REPORT_PHOTO_MAX_DATA_URL_LENGTH);
@@ -6015,6 +6026,18 @@ function removeReportPhotoAttachment(index) {
   preserveReportDraft();
   toast("Photo removed from report PDF");
   render();
+}
+
+function updateReportPhotoNote(index, note) {
+  const form = document.querySelector("#report-form");
+  const hiddenInput = form?.querySelector("input[name='field_photoAttachments']");
+  if (!form || !hiddenInput) return;
+
+  const photos = reportPhotoAttachmentsFromFields({ photoAttachments: hiddenInput.value });
+  if (!photos[index]) return;
+  photos[index].note = String(note || "").slice(0, 600);
+  hiddenInput.value = JSON.stringify(photos);
+  preserveReportDraft();
 }
 
 function bindSignaturePad() {
@@ -6177,6 +6200,7 @@ async function compressReportPhotoFile(file) {
     width: outputWidth,
     height: outputHeight,
     dataUrl,
+    note: "",
     addedAt: new Date().toISOString()
   };
 }

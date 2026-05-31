@@ -2942,6 +2942,19 @@ label {
   font-weight: 800;
 }
 
+.report-photo-note {
+  color: var(--brand-dark);
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 900;
+  gap: 5px;
+}
+
+.report-photo-note textarea {
+  min-height: 68px;
+  resize: vertical;
+}
+
 .empty-inline {
   background: rgba(255, 255, 255, 0.72);
   border: 1px dashed var(--line);
@@ -4927,6 +4940,10 @@ tr:last-child td {
   }
 
   .report-photo-preview button {
+    grid-column: 1 / -1;
+  }
+
+  .report-photo-note {
     grid-column: 1 / -1;
   }
 
