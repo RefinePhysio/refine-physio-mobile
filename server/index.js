@@ -1606,7 +1606,7 @@ function buildBootstrap(db, userId) {
   const isOwner = Boolean(currentUser.isOwner);
   const isReceptionist = currentUser.role === "receptionist";
   const isOperations = isAdmin || isReceptionist;
-  const canUseOwnerWorkspace = isAdmin || (isOwner && isOperations);
+  const canUseOwnerWorkspace = isOwner && isOperations;
   const visibleUsers = isOperations
     ? activeUsers
     : activeUsers.filter((user) => user.role === "admin" || user.id === currentUser.id);
@@ -1739,6 +1739,7 @@ function publicClinikoConfig(isAdmin = false) {
 function clinikoPractitioners(db) {
   return (db.users || [])
     .filter((user) => user.role === "contractor" && user.clinikoPractitionerId)
+    .filter((user) => user.isActive !== false && !user.clinikoOutOfScope)
     .filter((user) => user.syncSource === "cliniko" || user.requiresLoginSetup || user.clinikoUpdatedAt)
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
     .map(publicUser);

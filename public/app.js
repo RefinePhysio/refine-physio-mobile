@@ -6485,7 +6485,7 @@ function canUseOwnerWorkspace() {
   const user = state.data?.currentUser;
   return Boolean(
     user
-    && (user.isOwner || user.role === "admin")
+    && user.isOwner
     && user.role !== "contractor"
     && state.data?.permissions?.canAccessPractitionerWorkspace
   );
