@@ -18,7 +18,7 @@ services:
       - key: REFINE_AUTH_IMPLEMENTED
         value: "true"
       - key: REFINE_DATA_DIR
-        value: /var/data/refine
+        value: /var/data/refine-real
       - key: SESSION_SECRET
         generateValue: true
       - key: ADMIN_EMAIL
@@ -64,7 +64,7 @@ services:
       - key: CLINIKO_MAX_SYNC_PAGES
         value: "20"
       - key: CLINIKO_APPOINTMENT_SYNC_PAST_DAYS
-        value: "14"
+        value: "0"
       - key: CLINIKO_APPOINTMENT_SYNC_FUTURE_DAYS
         value: "90"
       - key: CLINIKO_ALLOW_MULTIPLE_LOCATIONS
