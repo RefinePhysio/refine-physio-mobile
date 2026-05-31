@@ -2358,10 +2358,6 @@ function renderReports() {
       <form class="card form-grid report-mobile-form" id="report-form">
         <input type="hidden" name="id" value="${existingReport?.id || ""}">
         <input type="hidden" name="appointmentId" value="${selectedAppointment?.id || ""}">
-        <div class="mobile-form-actions form-actions full">
-          <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
-          <button type="submit" name="mode" value="ready_for_admin">${readyForReviewLabel}</button>
-        </div>
         ${select("type", "Report type", data.reportTemplates.map((template) => template.type), state.reportType, "full", "report-type-select")}
         ${select("clientId", "Client", data.clients.map((client) => [client.id, client.name]), selectedClientId)}
         ${select("contractorId", "Therapist", data.contractors.map((contractor) => [contractor.id, contractor.name]), selectedContractorId)}
