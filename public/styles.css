@@ -7259,13 +7259,36 @@ h3,
   }
 
   .appointment-detail-modal .running-late-form {
+    align-items: center;
     grid-template-columns: minmax(0, 1fr) 54px 62px;
     overflow: hidden;
+    padding: 6px;
     width: 100%;
+  }
+
+  .appointment-detail-modal .running-late-header {
+    align-self: center;
+  }
+
+  .appointment-detail-modal .running-late-form label {
+    display: block;
+  }
+
+  .appointment-detail-modal .running-late-form label span {
+    border: 0;
+    clip: rect(0 0 0 0);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    width: 1px;
   }
 
   .appointment-detail-modal .running-late-form select,
   .appointment-detail-modal .running-late-form button {
+    height: 36px;
+    min-height: 36px;
     min-width: 0;
   }
 
