@@ -2381,6 +2381,9 @@ function createMessage(db, body) {
   if (!from) return { status: 404, error: "Sender not found" };
   if (!to) return { status: 404, error: "Recipient not found" };
   if (!messageBody) return { status: 400, error: "Message is required" };
+  if (from.role === "contractor" && to.role !== "admin") {
+    return { status: 403, error: "Practitioners can only message admin." };
+  }
 
   const message = {
     id: `msg-${randomUUID()}`,
