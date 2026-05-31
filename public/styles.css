@@ -837,6 +837,31 @@ label {
   padding: 12px;
 }
 
+.notes-quick-panel {
+  align-items: end;
+  background: #f4f9ff;
+  border: 1px solid #c8ddea;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.notes-quick-panel label {
+  margin: 0;
+}
+
+.notes-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notes-quick-actions button {
+  min-height: 38px;
+}
+
 .notes-filter-row {
   align-items: center;
   display: grid;
@@ -971,6 +996,26 @@ label {
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 10px;
+}
+
+.note-copy-control.is-single {
+  align-items: center;
+}
+
+.note-copy-control.is-single div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.note-copy-control.is-single strong {
+  color: var(--ink);
+}
+
+.note-copy-control.is-single span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .note-copy-control label {
@@ -2435,6 +2480,14 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
   margin-bottom: 10px;
   padding: 12px 14px;
+}
+
+.rebook-patient-picker {
+  min-width: min(260px, 100%);
+}
+
+.rebook-patient-picker select {
+  min-height: 38px;
 }
 
 .rebook-instruction-card strong,
@@ -4499,6 +4552,21 @@ tr:last-child td {
 
   .note-copy-control {
     grid-template-columns: 1fr;
+  }
+
+  .notes-quick-panel,
+  .note-copy-control.is-single {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .notes-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  }
+
+  .notes-quick-actions button {
+    width: 100%;
   }
 
   .note-copy-control button {

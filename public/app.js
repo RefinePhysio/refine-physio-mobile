@@ -1561,12 +1561,25 @@ function renderRebook() {
 
 function renderRebookInstructionCard(client) {
   const selectedLabel = state.rebookSelectedStartLocal ? formatSelectedSlot(state.rebookSelectedStartLocal) : "";
+  const clients = filterItems(clientsForPractitionerWorkspace(state.data.clients));
+  const rebookClients = [...new Map([
+    client,
+    ...clients.filter(clientNeedsRebook)
+  ].filter(Boolean).map((item) => [item.id, item])).values()];
   return `
     <div class="rebook-instruction-card">
       <div>
         <strong>Rebook ${escapeHtml(client.name)}</strong>
         <span>${selectedLabel ? `Selected ${escapeHtml(selectedLabel)}. Check details, then create the appointment.` : "Tap a blank time on the calendar. The new appointment will default to 1 hour."}</span>
       </div>
+      ${rebookClients.length > 1 ? `
+        <label class="rebook-patient-picker">
+          Patient
+          <select id="rebook-client-select">
+            ${rebookClients.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === client.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+          </select>
+        </label>
+      ` : ""}
       <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
     </div>
   `;
@@ -1929,6 +1942,7 @@ function renderNotes() {
       </div>
       <div class="notes-record-layout">
         <section class="notes-record-main">
+          ${renderNotesQuickPanel(noteAppointments, activeAppointment)}
           <div class="notes-filter-row">
             <span>Search</span>
             <input id="note-search" type="search" value="${escapeHtml(state.noteSearch)}" aria-label="Filter treatment notes" placeholder="Filter treatment notes by any word or phrase...">
@@ -2002,6 +2016,21 @@ function renderTreatmentNoteFormCard(appointment, existingNote, offlineDraft, in
 function renderPreviousTreatmentNoteCopyControl(appointment) {
   const previousNotes = previousTreatmentNotesForAppointment(appointment);
   if (!previousNotes.length) return "";
+  const onlyPrevious = previousNotes.length === 1 ? previousNotes[0] : null;
+
+  if (onlyPrevious) {
+    const noteDate = onlyPrevious.appointment?.startsAt || onlyPrevious.note.updatedAt || onlyPrevious.note.createdAt;
+    return `
+      <section class="note-copy-control is-single full">
+        <input type="hidden" data-previous-note-select value="${escapeHtml(onlyPrevious.note.id)}">
+        <div>
+          <strong>Previous note available</strong>
+          <span>${escapeHtml(formatDateTime(noteDate))} - ${escapeHtml(treatmentNoteTitle(onlyPrevious.appointment || appointment))}</span>
+        </div>
+        <button type="button" class="secondary" data-action="copy-previous-note">Copy last note</button>
+      </section>
+    `;
+  }
 
   return `
     <section class="note-copy-control full">
@@ -2041,6 +2070,31 @@ function renderTreatmentNoteReadOnlyCard(appointment, note, index, isActive, exp
         </div>
       </footer>
     </article>
+  `;
+}
+
+function renderNotesQuickPanel(appointments, activeAppointment) {
+  const incomplete = appointments.filter((appointment) => noteForAppointment(appointment.id)?.status !== "signed");
+  const nextIncomplete = incomplete.find((appointment) => appointment.id !== activeAppointment.id) || incomplete[0] || null;
+  return `
+    <section class="notes-quick-panel">
+      <label>
+        Write note for
+        <select id="note-appointment-select">
+          ${appointments.map((appointment) => {
+            const note = noteForAppointment(appointment.id);
+            const status = note?.status === "signed" ? "completed" : note?.status === "draft" ? "draft" : "not started";
+            return `<option value="${escapeHtml(appointment.id)}" ${appointment.id === activeAppointment.id ? "selected" : ""}>${escapeHtml(clientName(appointment.clientId))} - ${formatDateTime(appointment.startsAt)} - ${escapeHtml(status)}</option>`;
+          }).join("")}
+        </select>
+      </label>
+      <div class="notes-quick-actions">
+        ${nextIncomplete && nextIncomplete.id !== activeAppointment.id
+          ? `<button type="button" class="secondary" data-action="open-note" data-id="${escapeHtml(nextIncomplete.id)}">Next due note</button>`
+          : ""}
+        <button type="button" class="secondary" data-action="go-to-calendar-appointment" data-id="${escapeHtml(activeAppointment.id)}" data-starts-at="${escapeHtml(activeAppointment.startsAt)}">Calendar</button>
+      </div>
+    </section>
   `;
 }
 
