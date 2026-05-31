@@ -1725,11 +1725,11 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
   }
 
   if (slotIsPast(day.key, slot)) {
-    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy">Past</span></div>`;
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy" aria-label="Past time"></span></div>`;
   }
 
   if (busy) {
-    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy">Busy</span></div>`;
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy" aria-label="Busy time"></span></div>`;
   }
 
   const startLocal = localDateTimeFromDaySlot(day.key, slot);
