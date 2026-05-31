@@ -1277,12 +1277,14 @@ function renderContractorToday() {
 function renderContractorUpdates() {
   const notifications = sortNotifications(filterItems(notificationsForPractitionerWorkspace()));
   const unread = notifications.filter((item) => !item.read).length;
+  const sections = groupedUpdateSections(notifications);
 
   return `
     <section class="section">
       <div class="section-heading"><h3>Updates mailbox</h3><span>${unread} unread</span></div>
-      <div class="mailbox-list">
-        ${notifications.map(renderUpdateMailboxCard).join("") || emptyState("No updates from admin yet.")}
+      ${notifications.length ? renderUpdatesSummary(sections) : ""}
+      <div class="updates-section-list">
+        ${sections.map(renderUpdateSection).join("") || emptyState("No updates from admin yet.")}
       </div>
     </section>
   `;
@@ -1341,6 +1343,81 @@ function renderMessageInboxAlert(unreadCount) {
   `;
 }
 
+function groupedUpdateSections(notifications) {
+  const groups = [
+    {
+      id: "schedule",
+      title: "Schedule changes",
+      hint: "Rebookings, new bookings, and timing changes",
+      types: ["appointment_rebooked", "new_patient_booked", "rebook_status", "running_late"],
+      items: []
+    },
+    {
+      id: "reports",
+      title: "Reports and approvals",
+      hint: "Report copies, approval updates, and case-manager actions",
+      types: ["report_reminder", "approval_result", "report_copy", "case_manager_report_sent", "approval_request"],
+      items: []
+    },
+    {
+      id: "messages",
+      title: "Admin messages",
+      hint: "Direct messages and admin notices",
+      types: ["direct_message"],
+      items: []
+    },
+    {
+      id: "other",
+      title: "Other updates",
+      hint: "Referrals and general workflow updates",
+      types: [],
+      items: []
+    }
+  ];
+
+  notifications.forEach((item) => {
+    const group = groups.find((entry) => entry.types.includes(item.type)) || groups.at(-1);
+    group.items.push(item);
+  });
+
+  return groups.filter((group) => group.items.length);
+}
+
+function renderUpdatesSummary(sections) {
+  return `
+    <div class="updates-summary-strip" aria-label="Update categories">
+      ${sections.map((section) => {
+        const unread = section.items.filter((item) => !item.read).length;
+        return `
+          <article>
+            <strong>${section.items.length}</strong>
+            <span>${escapeHtml(section.title)}</span>
+            ${unread ? `<em>${unread} unread</em>` : `<em>all read</em>`}
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderUpdateSection(section) {
+  const unread = section.items.filter((item) => !item.read).length;
+  return `
+    <section class="updates-group updates-group-${escapeHtml(section.id)}">
+      <header class="updates-group-header">
+        <div>
+          <h4>${escapeHtml(section.title)}</h4>
+          <p>${escapeHtml(section.hint)}</p>
+        </div>
+        <span>${section.items.length} total${unread ? ` · ${unread} unread` : ""}</span>
+      </header>
+      <div class="mailbox-list updates-group-items">
+        ${section.items.map(renderUpdateMailboxCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderUpdateMailboxCard(item) {
   const isUnread = !item.read;
   return `
@@ -1352,10 +1429,9 @@ function renderUpdateMailboxCard(item) {
         <h4>${escapeHtml(notificationTypeLabel(item.type))}</h4>
         ${statusPill(item.read ? "read" : "unread", item.read ? "" : "blue")}
       </div>
-      <div class="detail-list compact">
-        <div><strong>From</strong>Admin</div>
-        <div><strong>Received</strong>${formatDateTime(item.createdAt)}</div>
-        <div><strong>Message</strong>${escapeHtml(item.message || "No message supplied.")}</div>
+      <div class="update-card-body">
+        <div><strong>Received</strong><span>${formatDateTime(item.createdAt)}</span></div>
+        <p>${escapeHtml(item.message || "No message supplied.")}</p>
       </div>
       ${isUnread ? `<div class="mini-actions"><button type="button" class="secondary" data-action="notification-read" data-id="${escapeHtml(item.id)}">Mark as read</button></div>` : ""}
     </article>
@@ -8512,7 +8588,8 @@ function notificationTypeLabel(type) {
     case_manager_report_sent: "Case manager report",
     rebook_status: "Rebook status",
     approval_request: "Approval request",
-    running_late: "Running late"
+    running_late: "Running late",
+    direct_message: "Direct message"
   }[type] || String(type || "Admin message").replaceAll("_", " ");
 }
 
