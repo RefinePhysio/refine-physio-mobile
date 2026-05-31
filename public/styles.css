@@ -7208,3 +7208,80 @@ h3,
     display: none;
   }
 }
+
+@media (max-width: 719px) {
+  .appointment-detail-backdrop {
+    overflow-x: hidden;
+  }
+
+  .appointment-detail-modal {
+    max-width: calc(100vw - 20px);
+    overflow-x: hidden;
+    width: calc(100vw - 20px);
+  }
+
+  .appointment-detail-modal .appointment-modal-header,
+  .appointment-detail-modal .appointment-modal-body,
+  .appointment-detail-modal .appointment-modal-details,
+  .appointment-detail-modal .appointment-modal-actions,
+  .appointment-detail-modal .appointment-action-group,
+  .appointment-detail-modal .appointment-modal-list,
+  .appointment-detail-modal .appointment-modal-list div,
+  .appointment-detail-modal .appointment-modal-contact,
+  .appointment-detail-modal .appointment-modal-name {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .appointment-detail-modal .appointment-modal-header > div {
+    max-width: 100%;
+    min-width: 0;
+    padding: 0 34px;
+  }
+
+  .appointment-detail-modal .appointment-modal-header h3,
+  .appointment-detail-modal .appointment-modal-header p,
+  .appointment-detail-modal .appointment-modal-header strong,
+  .appointment-detail-modal .appointment-modal-name h4,
+  .appointment-detail-modal .appointment-modal-contact span,
+  .appointment-detail-modal .appointment-modal-list div,
+  .appointment-detail-modal .next-appointment-link {
+    overflow-wrap: anywhere;
+    white-space: normal;
+    word-break: normal;
+  }
+
+  .appointment-detail-modal .next-appointment-link {
+    display: inline;
+    line-height: 1.25;
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .appointment-detail-modal .running-late-form {
+    grid-template-columns: minmax(0, 1fr) 54px 62px;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .appointment-detail-modal .running-late-form select,
+  .appointment-detail-modal .running-late-form button {
+    min-width: 0;
+  }
+
+  .appointment-detail-modal .running-late-form button {
+    padding-inline: 6px;
+  }
+
+  .appointment-detail-modal .appointment-action-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appointment-detail-modal .appointment-modal-actions button,
+  .appointment-detail-modal .appointment-modal-actions a.button {
+    line-height: 1.18;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+}
