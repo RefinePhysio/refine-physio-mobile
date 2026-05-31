@@ -2406,6 +2406,34 @@ label {
   position: relative;
 }
 
+.rebook-instruction-card {
+  align-items: center;
+  background: #f5fbfd;
+  border: 1px solid #cfe4ee;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+}
+
+.rebook-instruction-card strong,
+.rebook-instruction-card span {
+  display: block;
+}
+
+.rebook-instruction-card strong {
+  color: var(--brand-dark);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.rebook-instruction-card span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .rebook-booking-popover {
   max-height: calc(100% - 24px);
   overflow: auto;
@@ -3652,20 +3680,39 @@ label {
 
 .calendar-gap {
   background: rgba(255, 255, 255, 0.55);
-  border: 0;
-  border-radius: 0;
-  color: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: rgba(7, 95, 136, 0);
+  display: grid;
+  font-size: 0.68rem;
+  font-weight: 850;
+  gap: 0;
   height: calc(var(--slot-height) - 1px);
+  line-height: 1;
   min-height: calc(var(--slot-height) - 1px);
-  padding: 0;
+  place-content: center;
+  padding: 1px 3px;
   width: 100%;
 }
 
-.calendar-gap:hover {
+.rebook-slot-section .calendar-gap {
+  background: rgba(227, 247, 251, 0.68);
+  border-color: rgba(78, 183, 204, 0.28);
+  color: #075f88;
+}
+
+.calendar-gap small {
+  color: currentColor;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.calendar-gap:hover,
+.calendar-gap:focus-visible {
   background: rgba(8, 126, 164, 0.18);
   color: var(--brand-dark);
-  font-size: 0.68rem;
-  font-weight: 800;
+  outline: 2px solid rgba(8, 126, 164, 0.24);
+  outline-offset: -2px;
 }
 
 .calendar-busy {
@@ -6704,6 +6751,18 @@ textarea {
   .calendar-scroll {
     border-radius: 8px;
     max-height: 58dvh;
+  }
+
+  .rebook-instruction-card {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    margin-bottom: 8px;
+    padding: 10px;
+  }
+
+  .rebook-instruction-card button {
+    min-height: 40px;
+    width: 100%;
   }
 
   .calendar-grid {

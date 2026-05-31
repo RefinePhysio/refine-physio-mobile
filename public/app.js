@@ -44,6 +44,7 @@ const state = {
   unavailableBlockKind: "unavailable",
   rebookClientId: "",
   rebookFromAppointmentId: "",
+  rebookSelectedStartLocal: "",
   rebookStatusClientId: "",
   approvalClientId: "",
   approvalAppointmentId: "",
@@ -1516,10 +1517,13 @@ function renderRebook() {
     return `
       <section class="section rebook-focus-section">
         <div class="rebook-calendar-stage">
+          ${renderRebookInstructionCard(selectedRebookClient)}
           ${renderRebookSlotCalendar(selectedRebookClient)}
-          <div class="rebook-booking-popover" role="dialog" aria-label="Create rebooking">
-            ${renderRebookAppointmentForm(data, selectedRebookClient)}
-          </div>
+          ${state.rebookSelectedStartLocal ? `
+            <div class="rebook-booking-popover" role="dialog" aria-label="Create rebooking">
+              ${renderRebookAppointmentForm(data, selectedRebookClient)}
+            </div>
+          ` : ""}
         </div>
       </section>
     `;
@@ -1547,6 +1551,19 @@ function renderRebook() {
   `;
 }
 
+function renderRebookInstructionCard(client) {
+  const selectedLabel = state.rebookSelectedStartLocal ? formatSelectedSlot(state.rebookSelectedStartLocal) : "";
+  return `
+    <div class="rebook-instruction-card">
+      <div>
+        <strong>Rebook ${escapeHtml(client.name)}</strong>
+        <span>${selectedLabel ? `Selected ${escapeHtml(selectedLabel)}. Check details, then create the appointment.` : "Choose an available time on the calendar. The new appointment will default to 1 hour."}</span>
+      </div>
+      <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
+    </div>
+  `;
+}
+
 function renderRebookAppointmentForm(data, selectedRebookClient) {
   const practitioner = currentCalendarPractitioner();
   if (!practitioner) return emptyState("No practitioner is selected.");
@@ -1562,6 +1579,7 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
     <form class="new-appointment-panel rebook-appointment-panel" id="rebook-form">
       <header class="new-appointment-header">
         <h3>New appointment</h3>
+        <p>${escapeHtml(formatSelectedSlot(startLocal))}</p>
       </header>
       <div class="new-appointment-fields">
         <input type="hidden" name="actorId" value="${escapeHtml(data.currentUser.id)}">
@@ -1645,6 +1663,7 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
           <span></span>
           <div>
             <button type="submit">Create appointment</button>
+            <button type="button" class="secondary" data-action="change-rebook-slot">Choose another time</button>
             <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
           </div>
         </div>
@@ -1720,10 +1739,11 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
         type="button"
         class="calendar-gap"
         data-action="select-rebook-slot"
-        data-start-local="${startLocal}"
+        data-start-local="${escapeHtml(startLocal)}"
         aria-label="Book ${escapeHtml(client.name)} at ${formatSlotTime(slot)} on ${escapeHtml(day.label)}"
       >
-        Available
+        <span>Book</span>
+        <small>${formatSlotTime(slot)}</small>
       </button>
     </div>
   `;
@@ -4710,9 +4730,9 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-action='select-rebook-slot']").forEach((button) => {
     button.addEventListener("click", () => {
-      const inputEl = document.querySelector("#rebook-form input[name='startsAtLocal']");
-      if (inputEl) inputEl.value = button.dataset.startLocal;
-      setNewAppointmentTimeFields(button.dataset.startLocal, defaultRebookDurationMinutes());
+      state.rebookSelectedStartLocal = button.dataset.startLocal;
+      render();
+      focusRebookForm();
       toast(`Selected ${formatSelectedSlot(button.dataset.startLocal)}`);
     });
   });
@@ -4721,6 +4741,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.rebookClientId = button.dataset.clientId;
       state.rebookFromAppointmentId = button.dataset.id;
+      state.rebookSelectedStartLocal = "";
       state.calendarAppointmentId = "";
       state.calendarAppointmentMode = "details";
       closeCalendarBooking();
@@ -4735,6 +4756,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.rebookClientId = button.dataset.clientId;
       state.rebookFromAppointmentId = "";
+      state.rebookSelectedStartLocal = "";
       state.rebookStatusClientId = "";
       setActiveTab("rebook");
       render();
@@ -4747,8 +4769,17 @@ function bindViewEvents() {
       state.rebookStatusClientId = button.dataset.clientId;
       state.rebookClientId = "";
       state.rebookFromAppointmentId = "";
+      state.rebookSelectedStartLocal = "";
       setActiveTab("rebook");
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='change-rebook-slot']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.rebookSelectedStartLocal = "";
+      render();
+      focusRebookCalendar();
     });
   });
 
@@ -4756,6 +4787,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.rebookClientId = "";
       state.rebookFromAppointmentId = "";
+      state.rebookSelectedStartLocal = "";
       render();
     });
   });
@@ -4998,6 +5030,7 @@ function bindViewEvents() {
   document.querySelector("#rebook-client-select")?.addEventListener("change", (event) => {
     state.rebookClientId = event.target.value;
     state.rebookFromAppointmentId = "";
+    state.rebookSelectedStartLocal = "";
     render();
   });
 
@@ -5282,6 +5315,7 @@ async function submitRebook(event) {
   const appointment = await fetchJson("/api/appointments", { method: "POST", body: payload });
   state.rebookFromAppointmentId = "";
   state.rebookClientId = "";
+  state.rebookSelectedStartLocal = "";
   state.rebookStatusClientId = "";
   setActiveTab("today");
   setCalendarDateKey(brisbaneDateKey(appointment.startsAt));
@@ -7206,6 +7240,7 @@ function pad2(value) {
 }
 
 function defaultRebookStart(clientId) {
+  if (state.rebookSelectedStartLocal) return state.rebookSelectedStartLocal;
   const sourceAppointment = state.data.appointments.find((appointment) => appointment.id === state.rebookFromAppointmentId);
   const clientAppointments = sortAppointments(state.data.appointments.filter((appointment) => appointment.clientId === clientId));
   const base = sourceAppointment || clientAppointments.at(-1);
@@ -7329,6 +7364,12 @@ function syncRebookEndTimeFromStart() {
 function focusRebookCalendar() {
   window.setTimeout(() => {
     document.querySelector(".rebook-calendar-stage")?.scrollIntoView({ block: "start" });
+  }, 0);
+}
+
+function focusRebookForm() {
+  window.setTimeout(() => {
+    document.querySelector(".rebook-booking-popover")?.scrollIntoView({ block: "nearest" });
   }, 0);
 }
 
