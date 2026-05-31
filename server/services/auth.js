@@ -92,6 +92,30 @@ export function pruneExpiredSessions(db) {
   });
 }
 
+export function mergeSessionRecords(...sessionLists) {
+  const merged = new Map();
+  for (const sessions of sessionLists) {
+    for (const session of sessions || []) {
+      if (!session || typeof session !== "object") continue;
+      const key = session.tokenHash || session.id;
+      if (!key) continue;
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, { ...session });
+        continue;
+      }
+
+      const next = { ...existing, ...session };
+      next.createdAt = earliestIso(existing.createdAt, session.createdAt);
+      next.lastSeenAt = latestIso(existing.lastSeenAt, session.lastSeenAt);
+      next.expiresAt = earliestIso(existing.expiresAt, session.expiresAt);
+      next.revokedAt = earliestTruthyIso(existing.revokedAt, session.revokedAt);
+      merged.set(key, next);
+    }
+  }
+  return [...merged.values()];
+}
+
 export function sessionCookie(token, options = {}) {
   const secure = options.secure || process.env.NODE_ENV === "production" || process.env.COOKIE_SECURE === "true";
   const maxAge = Math.max(1, sessionTtlHours(options)) * 60 * 60;
@@ -166,4 +190,34 @@ function sessionTokenHash(token) {
 function sessionTtlHours(options = {}) {
   const hours = Number(options.hours || process.env.SESSION_TTL_HOURS || DEFAULT_SESSION_HOURS);
   return Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_SESSION_HOURS;
+}
+
+function earliestIso(first, second) {
+  if (!first) return second || "";
+  if (!second) return first || "";
+  const firstMs = isoTime(first);
+  const secondMs = isoTime(second);
+  if (!Number.isFinite(firstMs)) return second || "";
+  if (!Number.isFinite(secondMs)) return first || "";
+  return firstMs <= secondMs ? first : second;
+}
+
+function latestIso(first, second) {
+  if (!first) return second || "";
+  if (!second) return first || "";
+  const firstMs = isoTime(first);
+  const secondMs = isoTime(second);
+  if (!Number.isFinite(firstMs)) return second || "";
+  if (!Number.isFinite(secondMs)) return first || "";
+  return firstMs >= secondMs ? first : second;
+}
+
+function earliestTruthyIso(first, second) {
+  if (!first) return second || "";
+  if (!second) return first || "";
+  return earliestIso(first, second);
+}
+
+function isoTime(value) {
+  return new Date(value || 0).getTime();
 }

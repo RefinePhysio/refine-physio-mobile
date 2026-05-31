@@ -11,6 +11,7 @@ import {
   createSession,
   hashPassword,
   hasPassword,
+  mergeSessionRecords,
   normalizeEmail,
   publicUser,
   pruneExpiredSessions,
@@ -197,9 +198,24 @@ async function readDb() {
 }
 
 async function writeDb(db) {
+  const nextDb = normalizeDb(db);
+  const latestDb = await readLatestDbForWriteMerge();
+  if (latestDb) {
+    nextDb.sessions = mergeSessionRecords(latestDb.sessions, nextDb.sessions);
+    pruneExpiredSessions(nextDb);
+  }
   const tempPath = `${dbPath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(normalizeDb(db), null, 2)}\n`, "utf8");
+  await writeFile(tempPath, `${JSON.stringify(nextDb, null, 2)}\n`, "utf8");
   await rename(tempPath, dbPath);
+}
+
+async function readLatestDbForWriteMerge() {
+  try {
+    if (!existsSync(dbPath)) return null;
+    return normalizeDb(JSON.parse(await readFile(dbPath, "utf8")));
+  } catch {
+    return null;
+  }
 }
 
 async function waitForDbRetry(ms) {
