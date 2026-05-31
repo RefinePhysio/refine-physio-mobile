@@ -1709,7 +1709,7 @@ function buildBootstrap(db, userId) {
     appointmentStatuses,
     referralStatuses,
     clinikoSync: db.clinikoSync,
-    clinikoConfig: getClinikoConfig(),
+    clinikoConfig: publicClinikoConfig(isAdmin),
     permissions: {
       canManageUsers: isAdmin,
       canManageCliniko: isAdmin,
@@ -1718,6 +1718,21 @@ function buildBootstrap(db, userId) {
       canManageReferrals: isOperations,
       canAccessPractitionerWorkspace: canUseOwnerWorkspace
     }
+  };
+}
+
+function publicClinikoConfig(isAdmin = false) {
+  const current = getClinikoConfig();
+  if (isAdmin) return current;
+  return {
+    connected: current.connected,
+    appointmentCreateEnabled: current.appointmentCreateEnabled,
+    appointmentWriteEnabled: current.appointmentWriteEnabled,
+    reportUploadEnabled: current.reportUploadEnabled,
+    reportUploadAutoEnabled: current.reportUploadAutoEnabled,
+    noteUploadEnabled: current.noteUploadEnabled,
+    noteUploadAutoEnabled: current.noteUploadAutoEnabled,
+    mode: current.mode
   };
 }
 

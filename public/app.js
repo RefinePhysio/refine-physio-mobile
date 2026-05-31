@@ -273,11 +273,11 @@ function renderLogin() {
           <div class="brand-text-lockup brand-text-lockup-login" aria-label="Refine Physio Mobile">
             <span>Refine Physio</span><span>Mobile</span>
           </div>
-          <p>Secure staff portal</p>
+          <p>Secure Refine app portal</p>
         </div>
         <div class="login-copy">
-          <h2>${state.forgotMode ? "Reset access" : "Sign in"}</h2>
-          <p>${state.forgotMode ? "Enter your email and ask an admin to reset your password." : "Use your staff account to open your dashboard."}</p>
+          <h2>${state.forgotMode ? "Reset Refine app access" : "Sign in to Refine"}</h2>
+          <p>${state.forgotMode ? "This resets your Refine app password only." : "Use your Refine Physio Mobile account. This does not sign you into Cliniko."}</p>
         </div>
         ${state.loginError ? `<div class="form-error" role="alert">${escapeHtml(state.loginError)}</div>` : ""}
         ${state.forgotMessage ? `<div class="form-success" role="status">${escapeHtml(state.forgotMessage)}</div>` : ""}
@@ -300,6 +300,7 @@ function renderLoginForm() {
       <button type="submit" ${state.loginLoading ? "disabled" : ""}>
         ${state.loginLoading ? "Signing in..." : "Sign in"}
       </button>
+      <p class="login-security-note">Cliniko access stays separate. Practitioners can only use the app areas they are assigned to.</p>
       <button type="button" class="ghost" data-action="forgot-password">Forgot password?</button>
     </form>
   `;
@@ -3062,8 +3063,9 @@ function renderUserManagement() {
         <form class="card compact form-grid dense-form user-create-card" id="user-create-form">
           <div class="section-heading full">
             <h4>Create staff account</h4>
-            <span>Admin setup</span>
+            <span>Refine app login only</span>
           </div>
+          <p class="form-helper full">This creates access to this Refine app only. A Cliniko practitioner ID links the schedule, but it does not create or share a Cliniko login.</p>
           ${input("name", "Full name", "text", true)}
           ${input("email", "Email", "email", true)}
           ${select("role", "Role", [
@@ -3102,7 +3104,7 @@ function renderUserManagementCard(user) {
           <div class="meta-row">
             ${statusPill(user.isOwner ? "Owner" : roleLabel(user.role), user.role === "admin" ? "blue" : user.role === "receptionist" ? "gold" : "")}
             ${statusPill(user.isActive ? "active" : "inactive", user.isActive ? "blue" : "coral")}
-            ${statusPill(user.hasPassword ? "login ready" : "needs password", user.hasPassword ? "blue" : "gold")}
+            ${statusPill(user.hasPassword ? "app login ready" : "needs app password", user.hasPassword ? "blue" : "gold")}
             ${user.role === "contractor" ? statusPill(user.hasSignature ? "signature saved" : "no signature", user.hasSignature ? "blue" : "gold") : ""}
           </div>
         </div>
