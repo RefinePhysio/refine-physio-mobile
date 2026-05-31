@@ -12,6 +12,7 @@ const collectionKeys = {
   "/businesses": "businesses",
   "/patients": "patients",
   "/practitioners": "practitioners",
+  "/daily_availabilities": "daily_availabilities",
   "/appointment_types": "appointment_types",
   "/individual_appointments": "individual_appointments",
   "/treatment_notes": "treatment_notes",
@@ -109,7 +110,8 @@ export function clinikoEndpointSummary() {
   return {
     locations: "GET /businesses, GET /businesses/{id}",
     patients: "GET /patients, GET /patients/{id}",
-    practitioners: "GET /practitioners, GET /practitioners/{id}",
+    practitioners: "GET /businesses/{business_id}/practitioners, GET /practitioners/{id}",
+    practitionerWorkingHours: "GET /businesses/{business_id}/daily_availabilities",
     appointmentTypes: "GET /appointment_types, GET /appointment_types/{id}",
     appointments: "GET /individual_appointments filtered by business_id, practitioner_id, and date range; optional POST /individual_appointments for app-created bookings; optional PATCH /individual_appointments/{id} for appointment time/type write-back.",
     treatmentNotes: "Not enabled in Step 4 read-only sync.",
@@ -672,6 +674,89 @@ function mapClinikoAppointmentType(type) {
   };
 }
 
+function syncClinikoWorkingHours(db, dailyAvailabilities) {
+  const hoursByPractitioner = new Map();
+  for (const availability of dailyAvailabilities || []) {
+    const practitionerId = linkedIdFromRecord(availability, "practitioner");
+    const businessId = linkedIdFromRecord(availability, "business");
+    const dayOfWeek = Number(availability.day_of_week);
+    if (!practitionerId || !Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) continue;
+
+    const segments = Array.isArray(availability.availabilities) ? availability.availabilities : [];
+    const validSegments = segments
+      .map((segment) => ({
+        start: normaliseClinikoTime(segment.starts_at),
+        end: normaliseClinikoTime(segment.ends_at),
+        businessId,
+        timeZoneIdentifier: availability.time_zone_identifier || ""
+      }))
+      .filter((segment) => segment.start && segment.end && minutesFromTime(segment.end) > minutesFromTime(segment.start))
+      .sort((a, b) => minutesFromTime(a.start) - minutesFromTime(b.start));
+
+    if (!validSegments.length) continue;
+    const practitionerHours = hoursByPractitioner.get(practitionerId) || {};
+    practitionerHours[String(dayOfWeek)] ||= [];
+    practitionerHours[String(dayOfWeek)].push(...validSegments);
+    hoursByPractitioner.set(practitionerId, practitionerHours);
+  }
+
+  let updated = 0;
+  const syncedAt = new Date().toISOString();
+  for (const user of db.users || []) {
+    const practitionerId = String(user.clinikoPractitionerId || "");
+    if (!practitionerId || !hoursByPractitioner.has(practitionerId)) continue;
+    const workingHoursByDay = sortWorkingHoursByDay(hoursByPractitioner.get(practitionerId));
+    const range = workingHoursRange(workingHoursByDay);
+    user.workingHoursByDay = workingHoursByDay;
+    user.workingHoursSource = "cliniko_daily_availability";
+    user.workingHoursSyncedAt = syncedAt;
+    if (range.start && range.end) {
+      user.workingStart = range.start;
+      user.workingEnd = range.end;
+    }
+    updated += 1;
+  }
+  return updated;
+}
+
+function sortWorkingHoursByDay(workingHoursByDay) {
+  return Object.fromEntries(
+    Object.entries(workingHoursByDay)
+      .map(([day, segments]) => [
+        day,
+        segments.sort((a, b) => minutesFromTime(a.start) - minutesFromTime(b.start))
+      ])
+      .sort(([dayA], [dayB]) => Number(dayA) - Number(dayB))
+  );
+}
+
+function workingHoursRange(workingHoursByDay) {
+  const segments = Object.values(workingHoursByDay).flat();
+  if (!segments.length) return { start: "", end: "" };
+  return {
+    start: segments.reduce((earliest, segment) =>
+      minutesFromTime(segment.start) < minutesFromTime(earliest) ? segment.start : earliest, segments[0].start),
+    end: segments.reduce((latest, segment) =>
+      minutesFromTime(segment.end) > minutesFromTime(latest) ? segment.end : latest, segments[0].end)
+  };
+}
+
+function normaliseClinikoTime(value) {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return "";
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function minutesFromTime(value) {
+  const [hour, minute] = String(value || "").split(":").map(Number);
+  return (Number.isFinite(hour) ? hour : 0) * 60 + (Number.isFinite(minute) ? minute : 0);
+}
+
 function upsertClinikoPractitioners(db, practitioners, options = {}) {
   const incomingPractitionerIds = new Set();
   for (const practitioner of practitioners) {
@@ -824,6 +909,13 @@ export async function syncCliniko(db) {
       : [];
     const practitioners = [...new Map(practitionerPages.flat().map((practitioner) => [linkedId(practitioner), practitioner])).values()];
     upsertClinikoPractitioners(db, practitioners, { replaceActiveLocationScope: enabledBusinessIds.length > 0 });
+    const dailyAvailabilityPages = enabledBusinessIds.length
+      ? await Promise.all(enabledBusinessIds.map((businessId) =>
+        listResource(`/businesses/${encodeURIComponent(businessId)}/daily_availabilities?per_page=100`, "daily_availabilities")
+      ))
+      : [];
+    const dailyAvailabilities = dailyAvailabilityPages.flat();
+    const practitionersWithWorkingHours = syncClinikoWorkingHours(db, dailyAvailabilities);
 
     const enabledPractitionerIds = enabledClinikoPractitionerIds(db);
     const syncStartIso = appointmentSyncStartIso();
@@ -866,6 +958,7 @@ export async function syncCliniko(db) {
         locations: businesses.length,
         enabledLocations: enabledBusinessIds.length,
         enabledPractitioners: enabledPractitionerIds.length,
+        practitionersWithWorkingHours,
         appointments: incomingAppointments.length,
         skippedAppointments,
         staleAppointmentsNotReturned,
@@ -873,9 +966,9 @@ export async function syncCliniko(db) {
         prunedPatientsBeforeStart: prunedBeforeStart.clients
       },
       message: appointmentFilters.length
-        ? `Read-only sync imported ${patients.length} appointment-linked patients, ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, ${businesses.length} locations, and ${incomingAppointments.length} appointments from ${enabledBusinessIds.length} enabled Cliniko location${enabledBusinessIds.length === 1 ? "" : "s"} and ${enabledPractitionerIds.length} enabled practitioner${enabledPractitionerIds.length === 1 ? "" : "s"}${config().syncStartDate ? ` from ${config().syncStartDate}` : ""}${skippedAppointments ? ` (${skippedAppointments} skipped because patient or practitioner links were missing)` : ""}${staleAppointmentsNotReturned ? ` (${staleAppointmentsNotReturned} synced appointment${staleAppointmentsNotReturned === 1 ? "" : "s"} no longer returned by Cliniko marked out of scope)` : ""}${prunedBeforeStart.appointments ? ` (${prunedBeforeStart.appointments} older synced appointment${prunedBeforeStart.appointments === 1 ? "" : "s"} removed)` : ""}.`
+        ? `Read-only sync imported ${patients.length} appointment-linked patients, ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, ${businesses.length} locations, ${practitionersWithWorkingHours} Cliniko working-hour schedule${practitionersWithWorkingHours === 1 ? "" : "s"}, and ${incomingAppointments.length} appointments from ${enabledBusinessIds.length} enabled Cliniko location${enabledBusinessIds.length === 1 ? "" : "s"} and ${enabledPractitionerIds.length} enabled practitioner${enabledPractitionerIds.length === 1 ? "" : "s"}${config().syncStartDate ? ` from ${config().syncStartDate}` : ""}${skippedAppointments ? ` (${skippedAppointments} skipped because patient or practitioner links were missing)` : ""}${staleAppointmentsNotReturned ? ` (${staleAppointmentsNotReturned} synced appointment${staleAppointmentsNotReturned === 1 ? "" : "s"} no longer returned by Cliniko marked out of scope)` : ""}${prunedBeforeStart.appointments ? ` (${prunedBeforeStart.appointments} older synced appointment${prunedBeforeStart.appointments === 1 ? "" : "s"} removed)` : ""}.`
         : enabledBusinessIds.length
-        ? `Setup sync imported ${practitioners.length} practitioner${practitioners.length === 1 ? "" : "s"} from the selected Cliniko location and ${appointmentTypes.length} appointment types. Choose one Cliniko practitioner, then run Sync Now again before patient appointments are imported.`
+        ? `Setup sync imported ${practitioners.length} practitioner${practitioners.length === 1 ? "" : "s"} from the selected Cliniko location, ${practitionersWithWorkingHours} Cliniko working-hour schedule${practitionersWithWorkingHours === 1 ? "" : "s"}, and ${appointmentTypes.length} appointment types. Choose one Cliniko practitioner, then run Sync Now again before patient appointments are imported.`
         : `Setup sync imported ${appointmentTypes.length} appointment types and ${businesses.length} locations. Choose one Cliniko location, then run Sync Now again to import practitioners for that location.`
     };
     syncLog(db, { status: "synced", operation: "read_sync", message: sync.message });

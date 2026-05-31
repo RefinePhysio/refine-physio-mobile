@@ -209,6 +209,35 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
       });
     }
 
+    if (url.pathname === "/v1/businesses/401/daily_availabilities") {
+      return jsonResponse({
+        daily_availabilities: [
+          {
+            links: { self: "https://mock.cliniko.test/v1/daily_availabilities/501" },
+            practitioner: { links: { self: "https://mock.cliniko.test/v1/practitioners/201" } },
+            business: { links: { self: "https://mock.cliniko.test/v1/businesses/401" } },
+            day_of_week: 1,
+            availabilities: [{ starts_at: "08:30", ends_at: "16:30" }],
+            time_zone_identifier: "Australia/Brisbane",
+            updated_at: "2026-05-27T02:12:00Z"
+          },
+          {
+            links: { self: "https://mock.cliniko.test/v1/daily_availabilities/502" },
+            practitioner: { links: { self: "https://mock.cliniko.test/v1/practitioners/201" } },
+            business: { links: { self: "https://mock.cliniko.test/v1/businesses/401" } },
+            day_of_week: 3,
+            availabilities: [
+              { starts_at: "09:00", ends_at: "12:00" },
+              { starts_at: "13:00", ends_at: "17:00" }
+            ],
+            time_zone_identifier: "Australia/Brisbane",
+            updated_at: "2026-05-27T02:12:00Z"
+          }
+        ],
+        links: { next: null }
+      });
+    }
+
     if (url.pathname === "/v1/individual_appointments") {
       assert.equal(url.searchParams.getAll("q[]").includes("business_id:=401"), true);
       assert.equal(url.searchParams.getAll("q[]").includes("practitioner_id:=201"), true);
@@ -256,6 +285,13 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
     updateClinikoLocationEnabled(db, "401", true);
     await syncCliniko(db);
     assert.equal(db.users.length, 1);
+    const syncedPractitioner = db.users[0];
+    assert.equal(syncedPractitioner.workingStart, "08:30");
+    assert.equal(syncedPractitioner.workingEnd, "17:00");
+    assert.deepEqual(syncedPractitioner.workingHoursByDay["3"].map((segment) => `${segment.start}-${segment.end}`), [
+      "09:00-12:00",
+      "13:00-17:00"
+    ]);
     updateClinikoPractitionerEnabled(db, "201", true);
 
     const first = await syncCliniko(db);

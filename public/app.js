@@ -1508,14 +1508,14 @@ function renderPractitionerCalendar(appointments) {
                 );
                 const unavailableHere = slotHasUnavailableConflict(day.key, slot, 15);
                 return `
-                  <div class="${calendarCellClass(slot, practitioner)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+                  <div class="${calendarCellClass(slot, practitioner, day.key)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
                     ${slotAppointments.length
                       ? slotAppointments.map(renderCalendarEvent).join("")
                       : slotUnavailableBlocks.length
                       ? slotUnavailableBlocks.map(renderUnavailableBlock).join("")
                       : unavailableHere
                       ? `<span class="calendar-unavailable-fill" aria-hidden="true"></span>`
-                      : renderCalendarEmptySlot(day, slot)}
+                      : renderCalendarEmptySlot(day, slot, practitioner)}
                   </div>
                 `;
               }).join("")}
@@ -1548,8 +1548,11 @@ function renderUnavailableBlock(block) {
   `;
 }
 
-function renderCalendarEmptySlot(day, slot) {
+function renderCalendarEmptySlot(day, slot, practitioner = currentCalendarPractitioner()) {
   const startLocal = localDateTimeFromDaySlot(day.key, slot);
+  if (calendarSlotIsOutsideWorkHours(slot, practitioner, day.key)) {
+    return `<span class="calendar-busy" aria-label="Outside Cliniko working hours"></span>`;
+  }
   return `
     <button
       type="button"
@@ -1810,7 +1813,7 @@ function renderRebookSlotCalendar(client) {
 }
 
 function renderRebookSlotCell(day, slot, appointments, client, practitioner = currentCalendarPractitioner()) {
-  const cellClass = `${calendarCellClass(slot, practitioner)} ${day.isToday ? "is-today" : ""}`;
+  const cellClass = `${calendarCellClass(slot, practitioner, day.key)} ${day.isToday ? "is-today" : ""}`;
   const slotAppointments = appointments.filter((appointment) =>
     brisbaneDateKey(appointment.startsAt) === day.key
     && appointmentSlotMinutes(appointment) === slot
@@ -1831,6 +1834,10 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
 
   if (slotHasUnavailableConflict(day.key, slot, 15)) {
     return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-unavailable-fill" aria-hidden="true"></span></div>`;
+  }
+
+  if (calendarSlotIsOutsideWorkHours(slot, practitioner, day.key)) {
+    return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}"><span class="calendar-busy" aria-label="Outside Cliniko working hours"></span></div>`;
   }
 
   if (slotIsPast(day.key, slot)) {
@@ -6820,9 +6827,11 @@ function calendarDays(mode) {
 
 function calendarSlots(appointments, days, practitioner = currentCalendarPractitioner()) {
   const dayKeys = new Set(days.map((day) => day.key));
-  const hours = practitionerWorkingHours(practitioner);
-  let min = Math.min(7 * 60, hours.start);
-  let max = Math.max((21 * 60) + 15, hours.end + 15);
+  const ranges = days.map((day) => practitionerWorkingHours(practitioner, day.key));
+  const startValues = ranges.map((hours) => hours.start).filter(Number.isFinite);
+  const endValues = ranges.map((hours) => hours.end).filter(Number.isFinite);
+  let min = Math.min(7 * 60, ...startValues);
+  let max = Math.max((21 * 60) + 15, ...endValues.map((end) => end + 15));
 
   appointments
     .filter((appointment) => appointment.status !== "cancelled" && dayKeys.has(brisbaneDateKey(appointment.startsAt)))
@@ -6855,7 +6864,15 @@ function calendarSlotIsHalfHour(slot) {
   return slot % 60 === 30;
 }
 
-function practitionerWorkingHours(practitioner = currentCalendarPractitioner()) {
+function practitionerWorkingHours(practitioner = currentCalendarPractitioner(), dayKey = "") {
+  const segments = practitionerWorkingSegmentsForDay(practitioner, dayKey);
+  if (segments.length) {
+    return {
+      start: Math.min(...segments.map((segment) => segment.startMinutes)),
+      end: Math.max(...segments.map((segment) => segment.endMinutes))
+    };
+  }
+  if (dayKey && practitionerHasDailyWorkingHours(practitioner)) return { start: Number.NaN, end: Number.NaN };
   const start = timeStringToMinutes(practitionerWorkingStart(practitioner), 9 * 60);
   const end = timeStringToMinutes(practitionerWorkingEnd(practitioner), 17 * 60);
   if (end <= start) return { start: 9 * 60, end: 17 * 60 };
@@ -6881,17 +6898,50 @@ function timeStringToMinutes(value, fallback) {
   return hour * 60 + minute;
 }
 
-function calendarSlotIsOutsideWorkHours(slot, practitioner = currentCalendarPractitioner()) {
+function practitionerWorkingSegmentsForDay(practitioner = {}, dayKey = "") {
+  if (!dayKey || !practitionerHasDailyWorkingHours(practitioner)) return [];
+  const dayIndex = dayOfWeekFromDateKey(dayKey);
+  const segments = practitioner?.workingHoursByDay?.[String(dayIndex)] || [];
+  return segments
+    .map((segment) => ({
+      start: segment.start,
+      end: segment.end,
+      startMinutes: timeStringToMinutes(segment.start, Number.NaN),
+      endMinutes: timeStringToMinutes(segment.end, Number.NaN)
+    }))
+    .filter((segment) =>
+      Number.isFinite(segment.startMinutes)
+      && Number.isFinite(segment.endMinutes)
+      && segment.endMinutes > segment.startMinutes
+    );
+}
+
+function practitionerHasDailyWorkingHours(practitioner = {}) {
+  return Boolean(practitioner?.workingHoursByDay && Object.keys(practitioner.workingHoursByDay).length);
+}
+
+function dayOfWeekFromDateKey(dayKey) {
+  const [year, month, day] = String(dayKey || "").split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return 0;
+  return new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
+}
+
+function calendarSlotIsOutsideWorkHours(slot, practitioner = currentCalendarPractitioner(), dayKey = "") {
+  const segments = practitionerWorkingSegmentsForDay(practitioner, dayKey);
+  if (segments.length) {
+    return !segments.some((segment) => slot >= segment.startMinutes && slot < segment.endMinutes);
+  }
+  if (dayKey && practitionerHasDailyWorkingHours(practitioner)) return true;
   const hours = practitionerWorkingHours(practitioner);
   return slot < hours.start || slot >= hours.end;
 }
 
-function calendarSlotClasses(slot, baseClass, practitioner = currentCalendarPractitioner()) {
+function calendarSlotClasses(slot, baseClass, practitioner = currentCalendarPractitioner(), dayKey = "") {
   return [
     baseClass,
     calendarSlotIsHour(slot) ? "is-hour" : "",
     calendarSlotIsHalfHour(slot) ? "is-half-hour" : "",
-    calendarSlotIsOutsideWorkHours(slot, practitioner) ? "is-outside-hours" : ""
+    calendarSlotIsOutsideWorkHours(slot, practitioner, dayKey) ? "is-outside-hours" : ""
   ].filter(Boolean).join(" ");
 }
 
@@ -6899,8 +6949,8 @@ function calendarTimeClass(slot, practitioner = currentCalendarPractitioner()) {
   return calendarSlotClasses(slot, "calendar-time", practitioner);
 }
 
-function calendarCellClass(slot, practitioner = currentCalendarPractitioner()) {
-  return calendarSlotClasses(slot, "calendar-cell", practitioner);
+function calendarCellClass(slot, practitioner = currentCalendarPractitioner(), dayKey = "") {
+  return calendarSlotClasses(slot, "calendar-cell", practitioner, dayKey);
 }
 
 function appointmentSlotMinutes(appointment) {
