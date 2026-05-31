@@ -109,6 +109,7 @@ const reportTemplates = [
 const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
 const SIGNATURE_MAX_DATA_URL_LENGTH = 450000;
 const AI_REPORT_SECTION_MAX_CHARS = 5000;
+const REAL_CLINIKO_RESET_MARKER = "2026-06-01-real-cliniko-reset-v1";
 
 const appointmentStatuses = ["booked", "confirmed", "completed", "cancelled", "rescheduled", "no-show"];
 const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "paused", "discharged", "declined"];
@@ -268,11 +269,81 @@ function normalizeDb(db) {
       user.clinikoSyncEnabled = false;
     }
   }
+  maybeResetTestClinikoDataForRealSync(db);
   normalizeCaseManagers(db);
   pruneExpiredSessions(db);
   normalizeAppointmentApprovalState(db);
   syncInboxItems(db);
   return db;
+}
+
+function maybeResetTestClinikoDataForRealSync(db) {
+  if (String(process.env.REFINE_RESET_TEST_CLINIKO_DATA_ON_START || "").trim().toLowerCase() !== "true") return;
+  db.meta ||= {};
+  if (db.meta.realClinikoResetMarker === REAL_CLINIKO_RESET_MARKER) return;
+
+  const now = new Date().toISOString();
+  const keptUsers = (db.users || []).filter((user) => {
+    const role = String(user.role || "").toLowerCase();
+    return role === "admin" || role === "receptionist";
+  });
+
+  for (const user of keptUsers) {
+    user.clinikoPractitionerId = "";
+    user.clinikoSyncEnabled = false;
+    user.clinikoSyncEnabledAt = "";
+    user.clinikoSyncDisabledAt = now;
+    if (normalizeEmail(user.email) === "katie@refinehealthgroup.com.au") {
+      user.role = "admin";
+      user.isOwner = true;
+      user.isActive = true;
+      user.requiresLoginSetup = false;
+    }
+    user.updatedAt = now;
+  }
+
+  db.users = keptUsers;
+  for (const key of [
+    "clients",
+    "caseManagers",
+    "referrals",
+    "appointments",
+    "archivedAppointments",
+    "treatmentNotes",
+    "reports",
+    "appointmentTypes",
+    "rebookStatuses",
+    "notifications",
+    "approvalRequests",
+    "inboxItems",
+    "reportReminders",
+    "messages",
+    "runningLateAlerts",
+    "sessions",
+    "clinikoSyncLogs",
+    "syncErrors",
+    "clinikoLocations"
+  ]) {
+    db[key] = [];
+  }
+
+  db.activityLog = [{
+    id: `activity-${randomUUID()}`,
+    actorId: keptUsers.find((user) => normalizeEmail(user.email) === "katie@refinehealthgroup.com.au")?.id || "system",
+    action: "cleared_test_cliniko_data_before_real_sync",
+    entityType: "cliniko",
+    entityId: "real-cliniko-reset",
+    createdAt: now
+  }];
+  db.clinikoSync = {
+    status: getClinikoConfig().connected ? "ready" : "not_connected",
+    lastSyncAt: null,
+    message: "Test Cliniko data has been cleared. Choose one location and practitioner, then run Sync Now.",
+    counts: {}
+  };
+  db.meta.testClinikoClearedAt = now;
+  db.meta.realClinikoReady = true;
+  db.meta.realClinikoResetMarker = REAL_CLINIKO_RESET_MARKER;
 }
 
 function emptyDb() {
