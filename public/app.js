@@ -640,7 +640,7 @@ function renderView() {
     if (state.tab === "rebook") return renderRebook();
     if (state.tab === "requests") return renderRequests();
     if (state.tab === "updates") return renderContractorUpdates();
-    if (state.tab === "messages" && ownerViewingPractitioner()) return renderAdminMessages();
+    if (state.tab === "messages" && ownerViewingPractitioner()) return renderOwnerPractitionerMessagesPreview();
     if (state.tab === "messages") return renderContractorMessages();
     if (state.tab === "notes") return renderNotes();
     if (state.tab === "reports") return renderReports();
@@ -1305,6 +1305,28 @@ function renderContractorMessages() {
   `;
 }
 
+function renderOwnerPractitionerMessagesPreview() {
+  const practitioner = currentCalendarPractitioner();
+  const admin = adminUser();
+  const thread = practitioner && admin ? messagesBetweenUsers(practitioner.id, admin.id) : [];
+
+  return `
+    <section class="section">
+      <div class="section-heading"><h3>Messages</h3><span>Practitioner preview</span></div>
+      <section class="message-inbox-alert" aria-live="polite">
+        <strong>Practitioners can only message admin</strong>
+        <span>You are signed in as owner, so this is a preview of ${escapeHtml(practitioner?.name || "the practitioner")}'s admin chat. Use Admin Messages to reply.</span>
+      </section>
+      <div class="chat-panel chat-panel-full">
+        ${renderMessageList(thread, practitioner?.id)}
+        <div class="mini-actions">
+          <button type="button" data-action="owner-admin-messages">Open admin messages</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderMessageInboxAlert(unreadCount) {
   if (!unreadCount) return "";
   return `
@@ -1336,11 +1358,11 @@ function renderUpdateMailboxCard(item) {
   `;
 }
 
-function renderMessageList(messages) {
+function renderMessageList(messages, perspectiveUserId = state.data.currentUser.id) {
   return `
     <div class="chat-messages" aria-label="Message thread">
       ${messages.map((message) => `
-        <article class="chat-message ${message.fromUserId === state.data.currentUser.id ? "from-me" : "from-them"}">
+        <article class="chat-message ${message.fromUserId === perspectiveUserId ? "from-me" : "from-them"}">
           <div>
             <strong>${escapeHtml(userName(message.fromUserId))}</strong>
             <span>${formatDateTime(message.createdAt)}</span>
@@ -5101,6 +5123,18 @@ function bindViewEvents() {
     render();
   });
 
+  document.querySelector("[data-action='owner-admin-messages']")?.addEventListener("click", () => {
+    state.ownerView = "admin";
+    state.tab = "messages";
+    localStorage.setItem("refine-owner-view", state.ownerView);
+    localStorage.setItem("refine-active-tab", state.tab);
+    state.tabHistory = [];
+    state.calendarAppointmentId = "";
+    closeCalendarBooking();
+    closeUnavailableBlock();
+    render();
+  });
+
   document.querySelectorAll("[data-action='sync-error-retry']").forEach((button) => {
     button.addEventListener("click", async () => {
       const result = await fetchJson(`/api/sync-errors/${button.dataset.id}/retry`, {
@@ -6276,6 +6310,13 @@ function messagesForThread(userId) {
   return sortMessages((state.data.messages || []).filter((message) =>
     (message.fromUserId === state.data.currentUser.id && message.toUserId === userId)
     || (message.fromUserId === userId && message.toUserId === state.data.currentUser.id)
+  ));
+}
+
+function messagesBetweenUsers(firstUserId, secondUserId) {
+  return sortMessages((state.data.messages || []).filter((message) =>
+    (message.fromUserId === firstUserId && message.toUserId === secondUserId)
+    || (message.fromUserId === secondUserId && message.toUserId === firstUserId)
   ));
 }
 
