@@ -245,6 +245,7 @@ function normalizeDb(db) {
     user.signatureWidth = Number(user.signatureWidth || 0) || 520;
     user.signatureHeight = Number(user.signatureHeight || 0) || 160;
     user.signatureUpdatedAt ||= "";
+    normalizeUserWorkingHours(user);
     if (user.password_hash && !user.passwordHash) user.passwordHash = user.password_hash;
     delete user.password_hash;
     if (user.clinikoPractitionerId && typeof user.clinikoSyncEnabled !== "boolean") {
@@ -1046,6 +1047,7 @@ async function createAppUser(db, body, actorId) {
     discipline: role === "contractor" ? (body.discipline || "Physiotherapy") : (body.discipline || roleLabel(role)),
     phone: body.phone || "",
     baseSuburb: body.baseSuburb || "",
+    ...normalizedWorkingHours(body, role),
     clinikoPractitionerId: role === "contractor" ? String(body.clinikoPractitionerId || "").trim() : "",
     clinikoSyncEnabled: false,
     requiresLoginSetup: true,
@@ -1090,6 +1092,7 @@ function updateAppUser(db, userId, body, actorId) {
   for (const key of ["name", "discipline", "phone", "baseSuburb", "clinikoPractitionerId"]) {
     if (body[key] !== undefined) user[key] = String(body[key] || "").trim();
   }
+  Object.assign(user, normalizedWorkingHours(body, user.role));
   if (body.isActive !== undefined) user.isActive = Boolean(body.isActive);
   user.updatedAt = new Date().toISOString();
   logActivity(db, actorId, "updated_user", "user", user.id);
@@ -1317,6 +1320,36 @@ function roleLabel(role) {
     receptionist: "Reception",
     contractor: "Physiotherapy"
   }[role] || "";
+}
+
+function normalizeUserWorkingHours(user) {
+  Object.assign(user, normalizedWorkingHours(user, user.role));
+}
+
+function normalizedWorkingHours(body = {}, role = "contractor") {
+  if (role !== "contractor") return { workingStart: "", workingEnd: "" };
+  const workingStart = normalizeWorkingTime(body.workingStart, "09:00");
+  const workingEnd = normalizeWorkingTime(body.workingEnd, "17:00");
+  if (timeToMinutes(workingEnd) <= timeToMinutes(workingStart)) {
+    return { workingStart: "09:00", workingEnd: "17:00" };
+  }
+  return { workingStart, workingEnd };
+}
+
+function normalizeWorkingTime(value, fallback) {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return fallback;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return fallback;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function timeToMinutes(value) {
+  const [hour, minute] = String(value || "").split(":").map(Number);
+  return (Number.isFinite(hour) ? hour : 0) * 60 + (Number.isFinite(minute) ? minute : 0);
 }
 
 function professionalTitleForUser(user = {}) {

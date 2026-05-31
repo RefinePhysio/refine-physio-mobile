@@ -1390,7 +1390,7 @@ function renderPractitionerCalendar(appointments) {
   const practitioner = currentCalendarPractitioner();
   if (!practitioner) return emptyState("No practitioner is selected.");
   const days = calendarDays(state.calendarMode);
-  const slots = calendarSlots(appointments, days);
+  const slots = calendarSlots(appointments, days, practitioner);
   const visibleAppointments = appointments.filter((appointment) =>
     appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
   );
@@ -1405,7 +1405,7 @@ function renderPractitionerCalendar(appointments) {
           <div class="calendar-grid" style="--calendar-days: ${days.length}">
             ${renderCalendarHeader(days)}
             ${slots.map((slot) => `
-              <div class="${calendarTimeClass(slot)}">${formatCalendarTimeAxisLabel(slot)}</div>
+              <div class="${calendarTimeClass(slot, practitioner)}">${formatCalendarTimeAxisLabel(slot)}</div>
               ${days.map((day) => {
                 const slotAppointments = visibleAppointments.filter((appointment) =>
                   brisbaneDateKey(appointment.startsAt) === day.key
@@ -1417,7 +1417,7 @@ function renderPractitionerCalendar(appointments) {
                 );
                 const unavailableHere = slotHasUnavailableConflict(day.key, slot, 15);
                 return `
-                  <div class="${calendarCellClass(slot)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+                  <div class="${calendarCellClass(slot, practitioner)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
                     ${slotAppointments.length
                       ? slotAppointments.map(renderCalendarEvent).join("")
                       : slotUnavailableBlocks.length
@@ -1655,8 +1655,9 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
 
 function renderRebookSlotCalendar(client) {
   const appointments = sortAppointments(appointmentsForPractitioner(state.data.appointments));
+  const practitioner = currentCalendarPractitioner();
   const days = calendarDays(state.calendarMode);
-  const slots = calendarSlots(appointments, days);
+  const slots = calendarSlots(appointments, days, practitioner);
   const visibleAppointments = appointments.filter((appointment) =>
     appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
   );
@@ -1670,8 +1671,8 @@ function renderRebookSlotCalendar(client) {
           <div class="calendar-grid" style="--calendar-days: ${days.length}">
             ${renderCalendarHeader(days)}
             ${slots.map((slot) => `
-              <div class="${calendarTimeClass(slot)}">${formatCalendarTimeAxisLabel(slot)}</div>
-              ${days.map((day) => renderRebookSlotCell(day, slot, visibleAppointments, client)).join("")}
+              <div class="${calendarTimeClass(slot, practitioner)}">${formatCalendarTimeAxisLabel(slot)}</div>
+              ${days.map((day) => renderRebookSlotCell(day, slot, visibleAppointments, client, practitioner)).join("")}
             `).join("")}
           </div>
         </div>
@@ -1680,8 +1681,8 @@ function renderRebookSlotCalendar(client) {
   `;
 }
 
-function renderRebookSlotCell(day, slot, appointments, client) {
-  const cellClass = `${calendarCellClass(slot)} ${day.isToday ? "is-today" : ""}`;
+function renderRebookSlotCell(day, slot, appointments, client, practitioner = currentCalendarPractitioner()) {
+  const cellClass = `${calendarCellClass(slot, practitioner)} ${day.isToday ? "is-today" : ""}`;
   const slotAppointments = appointments.filter((appointment) =>
     brisbaneDateKey(appointment.startsAt) === day.key
     && appointmentSlotMinutes(appointment) === slot
@@ -2896,6 +2897,10 @@ function renderUserManagement() {
             ["contractor", "Practitioner / contractor"]
           ], "contractor")}
           ${input("discipline", "Discipline", "text", false, "", "Physiotherapy")}
+          <div class="working-hours-row full">
+            ${input("workingStart", "Working start", "time", false, "", "09:00")}
+            ${input("workingEnd", "Working finish", "time", false, "", "17:00")}
+          </div>
           ${input("clinikoPractitionerId", "Cliniko practitioner ID", "text")}
           ${input("password", "Temporary password", "password", true)}
           <div class="form-actions full">
@@ -2934,6 +2939,12 @@ function renderUserManagementCard(user) {
           ["contractor", "Practitioner / contractor"]
         ], user.role || "contractor")}
         ${input("discipline", "Discipline", "text", false, "", user.discipline || "")}
+        ${user.role === "contractor" ? `
+          <div class="working-hours-row full">
+            ${input("workingStart", "Working start", "time", false, "", practitionerWorkingStart(user))}
+            ${input("workingEnd", "Working finish", "time", false, "", practitionerWorkingEnd(user))}
+          </div>
+        ` : ""}
         ${input("clinikoPractitionerId", "Cliniko practitioner ID", "text", false, "", user.clinikoPractitionerId || "")}
         <label>Access
           <select name="isActive">
@@ -6528,10 +6539,11 @@ function calendarDays(mode) {
   });
 }
 
-function calendarSlots(appointments, days) {
+function calendarSlots(appointments, days, practitioner = currentCalendarPractitioner()) {
   const dayKeys = new Set(days.map((day) => day.key));
-  let min = 7 * 60;
-  let max = (21 * 60) + 15;
+  const hours = practitionerWorkingHours(practitioner);
+  let min = Math.min(7 * 60, hours.start);
+  let max = Math.max((21 * 60) + 15, hours.end + 15);
 
   appointments
     .filter((appointment) => appointment.status !== "cancelled" && dayKeys.has(brisbaneDateKey(appointment.startsAt)))
@@ -6564,25 +6576,52 @@ function calendarSlotIsHalfHour(slot) {
   return slot % 60 === 30;
 }
 
-function calendarSlotIsOutsideWorkHours(slot) {
-  return slot < 9 * 60 || slot >= 17 * 60;
+function practitionerWorkingHours(practitioner = currentCalendarPractitioner()) {
+  const start = timeStringToMinutes(practitionerWorkingStart(practitioner), 9 * 60);
+  const end = timeStringToMinutes(practitionerWorkingEnd(practitioner), 17 * 60);
+  if (end <= start) return { start: 9 * 60, end: 17 * 60 };
+  return { start, end };
 }
 
-function calendarSlotClasses(slot, baseClass) {
+function practitionerWorkingStart(practitioner = {}) {
+  return validTimeString(practitioner?.workingStart) ? practitioner.workingStart : "09:00";
+}
+
+function practitionerWorkingEnd(practitioner = {}) {
+  return validTimeString(practitioner?.workingEnd) ? practitioner.workingEnd : "17:00";
+}
+
+function validTimeString(value) {
+  return /^\d{2}:\d{2}$/.test(String(value || ""));
+}
+
+function timeStringToMinutes(value, fallback) {
+  if (!validTimeString(value)) return fallback;
+  const [hour, minute] = value.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallback;
+  return hour * 60 + minute;
+}
+
+function calendarSlotIsOutsideWorkHours(slot, practitioner = currentCalendarPractitioner()) {
+  const hours = practitionerWorkingHours(practitioner);
+  return slot < hours.start || slot >= hours.end;
+}
+
+function calendarSlotClasses(slot, baseClass, practitioner = currentCalendarPractitioner()) {
   return [
     baseClass,
     calendarSlotIsHour(slot) ? "is-hour" : "",
     calendarSlotIsHalfHour(slot) ? "is-half-hour" : "",
-    calendarSlotIsOutsideWorkHours(slot) ? "is-outside-hours" : ""
+    calendarSlotIsOutsideWorkHours(slot, practitioner) ? "is-outside-hours" : ""
   ].filter(Boolean).join(" ");
 }
 
-function calendarTimeClass(slot) {
-  return calendarSlotClasses(slot, "calendar-time");
+function calendarTimeClass(slot, practitioner = currentCalendarPractitioner()) {
+  return calendarSlotClasses(slot, "calendar-time", practitioner);
 }
 
-function calendarCellClass(slot) {
-  return calendarSlotClasses(slot, "calendar-cell");
+function calendarCellClass(slot, practitioner = currentCalendarPractitioner()) {
+  return calendarSlotClasses(slot, "calendar-cell", practitioner);
 }
 
 function appointmentSlotMinutes(appointment) {

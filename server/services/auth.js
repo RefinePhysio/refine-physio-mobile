@@ -138,6 +138,8 @@ export function publicUser(user, options = {}) {
     discipline: user.discipline || "",
     phone: user.phone || "",
     baseSuburb: user.baseSuburb || "",
+    workingStart: user.workingStart || "09:00",
+    workingEnd: user.workingEnd || "17:00",
     clinikoPractitionerId: user.clinikoPractitionerId || "",
     clinikoSyncEnabled: Boolean(user.clinikoSyncEnabled),
     syncSource: user.syncSource || "",
