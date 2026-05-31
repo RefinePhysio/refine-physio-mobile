@@ -2356,10 +2356,15 @@ label {
 }
 
 .time-selects select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: none;
   font-weight: 750;
   min-height: 36px;
   min-width: 0;
-  padding: 7px 6px;
+  padding: 7px 4px;
+  text-align: center;
+  text-align-last: center;
   width: 100%;
 }
 
@@ -7481,7 +7486,18 @@ h3,
     padding: 9px 10px;
   }
 
-  .time-selects select {
-    min-height: 42px;
+  .time-selects select,
+  .new-appointment-panel .time-selects select,
+  .calendar-booking-modal .time-selects select,
+  .rebook-appointment-panel .time-selects select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background-image: none !important;
+    color: var(--ink);
+    font-weight: 850;
+    min-height: 42px !important;
+    padding-inline: 4px !important;
+    text-align: center;
+    text-align-last: center;
   }
 }
