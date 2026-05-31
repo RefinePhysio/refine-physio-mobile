@@ -2413,6 +2413,49 @@ label {
   width: 100%;
 }
 
+.repeat-options {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  width: 100%;
+}
+
+.repeat-options label {
+  min-width: 0;
+}
+
+.repeat-options input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.repeat-options span {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #cfdde6;
+  border-radius: 8px;
+  color: #233746;
+  display: flex;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 10px;
+  text-align: center;
+  width: 100%;
+}
+
+.repeat-options input:checked + span {
+  background: #087ea4;
+  border-color: #087ea4;
+  color: #fff;
+}
+
+.repeat-options input:focus-visible + span {
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
 .time-warning {
   background: #fffdf8;
   border: 1px solid #d8d0c3;
@@ -7012,6 +7055,17 @@ textarea {
     font-size: 0.85rem;
     min-height: 32px;
     padding: 5px 4px;
+  }
+
+  .calendar-booking-modal .repeat-options {
+    gap: 5px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-booking-modal .repeat-options span {
+    font-size: 0.82rem;
+    min-height: 34px;
+    padding: 7px 8px;
   }
 
   .calendar-booking-modal .time-select-group {

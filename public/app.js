@@ -1665,9 +1665,7 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
 
         <div class="new-appointment-row">
           <span>Repeat</span>
-          <select name="recurrence">
-            ${["None", "Weekly", "Fortnightly", "Monthly"].map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}
-          </select>
+          ${renderRecurrenceOptions()}
         </div>
 
         <div class="new-appointment-row">
@@ -3734,9 +3732,7 @@ function renderCalendarBookingModal() {
 
             <div class="new-appointment-row">
               <span>Repeat</span>
-              <select name="recurrence">
-                ${["None", "Weekly", "Fortnightly", "Monthly"].map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}
-              </select>
+              ${renderRecurrenceOptions()}
             </div>
 
             <div class="new-appointment-row">
@@ -3759,6 +3755,20 @@ function renderCalendarBookingModal() {
           </div>
         </form>
       </article>
+    </div>
+  `;
+}
+
+function renderRecurrenceOptions(selected = "None") {
+  const options = ["None", "Weekly", "Fortnightly", "Monthly"];
+  return `
+    <div class="repeat-options" role="radiogroup" aria-label="Repeat appointment">
+      ${options.map((option) => `
+        <label>
+          <input type="radio" name="recurrence" value="${escapeHtml(option)}" ${option === selected ? "checked" : ""}>
+          <span>${escapeHtml(option)}</span>
+        </label>
+      `).join("")}
     </div>
   `;
 }
