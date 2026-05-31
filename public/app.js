@@ -4392,6 +4392,31 @@ async function submitForgotPassword(event) {
 }
 
 function handleViewClick(event) {
+  const rebookSlotButton = event.target.closest("[data-action='select-rebook-slot']");
+  if (rebookSlotButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    state.rebookSelectedStartLocal = rebookSlotButton.dataset.startLocal;
+    render();
+    focusRebookForm();
+    toast(`Selected ${formatSelectedSlot(rebookSlotButton.dataset.startLocal)}`);
+    return;
+  }
+
+  const appointmentDetailButton = event.target.closest("[data-action='appointment-details']");
+  if (appointmentDetailButton) {
+    if (appointmentDetailButton.dataset.skipClick === "true") return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    state.calendarBookingStartLocal = "";
+    closeUnavailableBlock();
+    state.calendarAppointmentId = appointmentDetailButton.dataset.id;
+    state.calendarAppointmentMode = "details";
+    render();
+    return;
+  }
+
   const appointmentJumpButton = event.target.closest("[data-action='go-to-next-appointment'], [data-action='go-to-calendar-appointment']");
   if (!appointmentJumpButton) return;
 
@@ -4480,8 +4505,10 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-action='appointment-details']").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       if (button.dataset.skipClick === "true") return;
+      event.preventDefault();
+      event.stopPropagation();
       state.calendarBookingStartLocal = "";
       closeUnavailableBlock();
       state.calendarAppointmentId = button.dataset.id;

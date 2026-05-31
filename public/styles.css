@@ -3625,9 +3625,9 @@ label {
 .calendar-resize-handle {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.9));
   border-top: 1px solid rgba(21, 58, 91, 0.18);
-  bottom: -2px;
+  bottom: 0;
   cursor: ns-resize;
-  height: 24px;
+  height: min(12px, 35%);
   left: 0;
   position: absolute;
   right: 0;
@@ -3643,14 +3643,14 @@ label {
   height: 4px;
   left: 50%;
   position: absolute;
-  top: 11px;
-  transform: translateX(-50%);
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 42px;
 }
 
 .calendar-resize-handle::before {
   content: "";
-  inset: -8px 0 -6px;
+  inset: 0;
   position: absolute;
 }
 
