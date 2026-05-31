@@ -751,7 +751,7 @@ function renderAdminMessages() {
         </aside>
         <section class="chat-panel">
           ${selectedUser ? `
-            <div class="section-heading"><h3>${escapeHtml(selectedUser.name)}</h3><span>${unreadMessagesFromUser(selectedUser.id).length ? "New messages" : "Direct message"}</span></div>
+            ${renderChatHeader(selectedUser.name, unreadMessagesFromUser(selectedUser.id).length ? "New messages" : "Direct message", "Admin can reply to this practitioner here.")}
             ${renderMessageList(thread)}
             ${renderMessageForm(selectedUser.id, "Reply to practitioner")}
           ` : emptyState("Choose a practitioner conversation.")}
@@ -1298,7 +1298,8 @@ function renderContractorMessages() {
       <div class="section-heading"><h3>Messages</h3><span>${unreadCount ? `${unreadCount} unread` : "Admin chat"}</span></div>
       ${renderMessageInboxAlert(unreadCount)}
       ${admin ? `
-        <div class="chat-panel chat-panel-full">
+        <div class="chat-panel chat-panel-full practitioner-chat-panel">
+          ${renderChatHeader("Admin messages", "Direct to admin", "Send updates or questions to admin/reception only.")}
           ${renderMessageList(thread)}
           ${renderMessageForm(admin.id, "Send message to admin")}
         </div>
@@ -1319,9 +1320,10 @@ function renderOwnerPractitionerMessagesPreview() {
         <strong>Practitioners can only message admin</strong>
         <span>You are signed in as owner, so this is a preview of ${escapeHtml(practitioner?.name || "the practitioner")}'s admin chat. Use Admin Messages to reply.</span>
       </section>
-      <div class="chat-panel chat-panel-full">
+      <div class="chat-panel chat-panel-full practitioner-chat-panel">
+        ${renderChatHeader("Admin messages", "Practitioner preview", `${practitioner?.name || "Practitioner"} can message admin only.`)}
         ${renderMessageList(thread, practitioner?.id)}
-        <div class="mini-actions">
+        <div class="chat-compose chat-preview-actions">
           <button type="button" data-action="owner-admin-messages">Open admin messages</button>
         </div>
       </div>
@@ -1362,7 +1364,7 @@ function renderUpdateMailboxCard(item) {
 
 function renderMessageList(messages, perspectiveUserId = state.data.currentUser.id) {
   return `
-    <div class="chat-messages" aria-label="Message thread">
+    <div class="chat-messages ${messages.length ? "" : "is-empty"}" aria-label="Message thread">
       ${messages.map((message) => `
         <article class="chat-message ${message.fromUserId === perspectiveUserId ? "from-me" : "from-them"}">
           <div>
@@ -1373,6 +1375,18 @@ function renderMessageList(messages, perspectiveUserId = state.data.currentUser.
         </article>
       `).join("") || emptyState("No messages yet.")}
     </div>
+  `;
+}
+
+function renderChatHeader(title, status, hint = "") {
+  return `
+    <header class="chat-panel-header">
+      <div>
+        <h4>${escapeHtml(title)}</h4>
+        ${hint ? `<p>${hint}</p>` : ""}
+      </div>
+      ${status ? `<span>${escapeHtml(status)}</span>` : ""}
+    </header>
   `;
 }
 
