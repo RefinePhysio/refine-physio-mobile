@@ -210,7 +210,8 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
       });
     }
 
-    if (url.pathname === "/v1/businesses/401/daily_availabilities") {
+    if (url.pathname === "/v1/practitioners/201/daily_availabilities") {
+      assert.equal(url.searchParams.getAll("q[]").includes("business_id:=401"), true);
       return jsonResponse({
         daily_availabilities: [
           {
@@ -567,6 +568,50 @@ test("Cliniko read-only sync automatically scopes to the Refine Physio Mobile lo
     assert.equal(db.clinikoLocations.find((location) => location.clinikoBusinessId === "401").clinikoOutOfScope, true);
     assert.deepEqual(practitionerLocationFetches, ["/v1/businesses/402/practitioners"]);
     assert.deepEqual(db.users.map((user) => user.clinikoPractitionerId), ["202"]);
+  });
+});
+
+test("Cliniko read-only sync clears default hours when a practitioner has no Cliniko availability", async () => {
+  const mockFetch = async (input) => {
+    const url = new URL(String(input));
+
+    if (url.pathname === "/v1/businesses") {
+      return jsonResponse({
+        businesses: [
+          { links: { self: "https://mock.cliniko.test/v1/businesses/401" }, business_name: "Refine Physio Mobile" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/businesses/401/practitioners") {
+      return jsonResponse({
+        practitioners: [
+          { links: { self: "https://mock.cliniko.test/v1/practitioners/888" }, first_name: "Junwei", last_name: "Feng" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/practitioners/888/daily_availabilities") {
+      assert.equal(url.searchParams.getAll("q[]").includes("business_id:=401"), true);
+      return jsonResponse({ daily_availabilities: [], links: { next: null } });
+    }
+
+    if (url.pathname === "/v1/appointment_types") return jsonResponse({ appointment_types: [], links: { next: null } });
+    return jsonResponse({ links: { next: null } });
+  };
+
+  await withMockCliniko(mockFetch, async () => {
+    const db = blankDb();
+    await syncCliniko(db);
+
+    const practitioner = db.users.find((user) => user.clinikoPractitionerId === "888");
+    assert.equal(practitioner.name, "Junwei Feng");
+    assert.equal(practitioner.workingHoursSource, "cliniko_daily_availability");
+    assert.deepEqual(practitioner.workingHoursByDay, {});
+    assert.equal(practitioner.workingStart, "");
+    assert.equal(practitioner.workingEnd, "");
   });
 });
 

@@ -6919,7 +6919,8 @@ function practitionerWorkingSegmentsForDay(practitioner = {}, dayKey = "") {
 }
 
 function practitionerHasDailyWorkingHours(practitioner = {}) {
-  return Boolean(practitioner?.workingHoursByDay && Object.keys(practitioner.workingHoursByDay).length);
+  return practitioner?.workingHoursSource === "cliniko_daily_availability"
+    || Boolean(practitioner?.workingHoursByDay && Object.keys(practitioner.workingHoursByDay).length);
 }
 
 function dayOfWeekFromDateKey(dayKey) {
