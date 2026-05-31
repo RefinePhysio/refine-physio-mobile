@@ -497,6 +497,7 @@ export function enabledClinikoBusinessIds(db) {
 function clinikoPractitionerCandidates(db) {
   return (db.users || [])
     .filter((user) => user.role === "contractor" && user.clinikoPractitionerId)
+    .filter((user) => user.isActive !== false && !user.clinikoOutOfScope)
     .filter((user) => user.syncSource === "cliniko" || user.requiresLoginSetup || user.clinikoUpdatedAt || user.clinikoSyncEnabled);
 }
 
@@ -671,19 +672,23 @@ function mapClinikoAppointmentType(type) {
   };
 }
 
-function upsertClinikoPractitioners(db, practitioners) {
+function upsertClinikoPractitioners(db, practitioners, options = {}) {
+  const incomingPractitionerIds = new Set();
   for (const practitioner of practitioners) {
     const practitionerId = linkedId(practitioner);
     if (!practitionerId) continue;
+    incomingPractitionerIds.add(practitionerId);
     const name = fullName(practitioner);
     const existing = db.users.find((user) => String(user.clinikoPractitionerId || "") === practitionerId);
     if (existing) {
       existing.name = name || existing.name;
       existing.email = practitioner.email || existing.email || "";
       existing.role = existing.role || "contractor";
+      if (existing.clinikoOutOfScope) existing.isActive = true;
       existing.discipline = existing.discipline || "Physiotherapy";
       existing.syncSource = "cliniko";
       existing.syncStatus = "synced";
+      existing.clinikoOutOfScope = false;
       existing.clinikoSyncEnabled = Boolean(existing.clinikoSyncEnabled);
       existing.clinikoUpdatedAt = practitioner.updated_at || existing.clinikoUpdatedAt || "";
       continue;
@@ -702,13 +707,44 @@ function upsertClinikoPractitioners(db, practitioners) {
       clinikoSyncEnabled: false,
       clinikoSyncEnabledAt: "",
       clinikoSyncDisabledAt: "",
+      clinikoOutOfScope: false,
       syncSource: "cliniko",
       syncStatus: "synced",
       clinikoUpdatedAt: practitioner.updated_at || ""
     });
   }
 
+  if (options.replaceActiveLocationScope) {
+    removeClinikoPractitionersOutsideActiveLocations(db, incomingPractitionerIds);
+  }
+
   chooseEnabledClinikoPractitioner(db);
+}
+
+function removeClinikoPractitionersOutsideActiveLocations(db, activeLocationPractitionerIds) {
+  const allowedIds = new Set([...activeLocationPractitionerIds].map(String));
+  db.users = (db.users || []).filter((user) => {
+    const practitionerId = String(user.clinikoPractitionerId || "");
+    const isClinikoContractor = user.role === "contractor" && practitionerId && user.syncSource === "cliniko";
+    if (!isClinikoContractor || allowedIds.has(practitionerId)) return true;
+
+    user.clinikoSyncEnabled = false;
+    user.clinikoOutOfScope = true;
+    user.syncStatus = "out_of_scope";
+    if (!clinikoPractitionerHasLocalWork(db, user.id)) return false;
+    user.isActive = false;
+    return true;
+  });
+}
+
+function clinikoPractitionerHasLocalWork(db, userId) {
+  return Boolean(
+    (db.appointments || []).some((appointment) => appointment.contractorId === userId)
+    || (db.reports || []).some((report) => report.contractorId === userId)
+    || (db.treatmentNotes || []).some((note) => note.contractorId === userId)
+    || (db.referrals || []).some((referral) => referral.assignedContractorId === userId)
+    || (db.approvalRequests || []).some((request) => request.contractorId === userId)
+  );
 }
 
 function mapClinikoAppointment(appointment, db) {
@@ -772,17 +808,23 @@ export async function syncCliniko(db) {
 
   const startedAt = new Date().toISOString();
   try {
-    const [businesses, practitioners, appointmentTypes] = await Promise.all([
+    const [businesses, appointmentTypes] = await Promise.all([
       listResource("/businesses?per_page=100", "businesses"),
-      listResource("/practitioners?per_page=100", "practitioners"),
       listResource("/appointment_types?per_page=100", "appointment_types")
     ]);
 
     mergeClinikoLocations(db, businesses);
     mergeByExternalId(db.appointmentTypes, appointmentTypes.map(mapClinikoAppointmentType), "clinikoAppointmentTypeId");
-    upsertClinikoPractitioners(db, practitioners);
 
     const enabledBusinessIds = enabledClinikoBusinessIds(db);
+    const practitionerPages = enabledBusinessIds.length
+      ? await Promise.all(enabledBusinessIds.map((businessId) =>
+        listResource(`/businesses/${encodeURIComponent(businessId)}/practitioners?per_page=100`, "practitioners")
+      ))
+      : [];
+    const practitioners = [...new Map(practitionerPages.flat().map((practitioner) => [linkedId(practitioner), practitioner])).values()];
+    upsertClinikoPractitioners(db, practitioners, { replaceActiveLocationScope: enabledBusinessIds.length > 0 });
+
     const enabledPractitionerIds = enabledClinikoPractitionerIds(db);
     const syncStartIso = appointmentSyncStartIso();
     const appointmentFilters = enabledBusinessIds.flatMap((businessId) =>
@@ -832,7 +874,9 @@ export async function syncCliniko(db) {
       },
       message: appointmentFilters.length
         ? `Read-only sync imported ${patients.length} appointment-linked patients, ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, ${businesses.length} locations, and ${incomingAppointments.length} appointments from ${enabledBusinessIds.length} enabled Cliniko location${enabledBusinessIds.length === 1 ? "" : "s"} and ${enabledPractitionerIds.length} enabled practitioner${enabledPractitionerIds.length === 1 ? "" : "s"}${config().syncStartDate ? ` from ${config().syncStartDate}` : ""}${skippedAppointments ? ` (${skippedAppointments} skipped because patient or practitioner links were missing)` : ""}${staleAppointmentsNotReturned ? ` (${staleAppointmentsNotReturned} synced appointment${staleAppointmentsNotReturned === 1 ? "" : "s"} no longer returned by Cliniko marked out of scope)` : ""}${prunedBeforeStart.appointments ? ` (${prunedBeforeStart.appointments} older synced appointment${prunedBeforeStart.appointments === 1 ? "" : "s"} removed)` : ""}.`
-        : `Setup sync imported ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, and ${businesses.length} locations. Choose one Cliniko location and one Cliniko practitioner, then run Sync Now again before any patient appointments are imported.`
+        : enabledBusinessIds.length
+        ? `Setup sync imported ${practitioners.length} practitioner${practitioners.length === 1 ? "" : "s"} from the selected Cliniko location and ${appointmentTypes.length} appointment types. Choose one Cliniko practitioner, then run Sync Now again before patient appointments are imported.`
+        : `Setup sync imported ${appointmentTypes.length} appointment types and ${businesses.length} locations. Choose one Cliniko location, then run Sync Now again to import practitioners for that location.`
     };
     syncLog(db, { status: "synced", operation: "read_sync", message: sync.message });
     return { db, sync };

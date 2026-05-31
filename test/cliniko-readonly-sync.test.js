@@ -178,7 +178,7 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
       });
     }
 
-    if (url.pathname === "/v1/practitioners") {
+    if (url.pathname === "/v1/businesses/401/practitioners") {
       return jsonResponse({
         practitioners: [
           {
@@ -244,9 +244,9 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
     const setup = await syncCliniko(db);
     assert.equal(setup.sync.status, "connected");
     assert.equal(setup.sync.mode, "read_only");
-    assert.match(setup.sync.message, /Choose one Cliniko location and one Cliniko practitioner/);
+    assert.match(setup.sync.message, /Choose one Cliniko location/);
     assert.equal(db.clients.length, 0);
-    assert.equal(db.users.length, 1);
+    assert.equal(db.users.length, 0);
     assert.equal(db.appointmentTypes.length, 1);
     assert.equal(db.clinikoLocations.length, 1);
     assert.equal(db.clinikoLocations.filter((location) => location.enabled).length, 0);
@@ -254,6 +254,8 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
     assert.equal(db.appointments.length, 0);
 
     updateClinikoLocationEnabled(db, "401", true);
+    await syncCliniko(db);
+    assert.equal(db.users.length, 1);
     updateClinikoPractitionerEnabled(db, "201", true);
 
     const first = await syncCliniko(db);
@@ -308,7 +310,7 @@ test("Cliniko read-only sync updates appointment edits made in Cliniko", async (
       });
     }
 
-    if (url.pathname === "/v1/practitioners") {
+    if (url.pathname === "/v1/businesses/401/practitioners") {
       return jsonResponse({
         practitioners: [
           { links: { self: "https://mock.cliniko.test/v1/practitioners/201" }, first_name: "Ella", last_name: "Mason" }
@@ -361,6 +363,7 @@ test("Cliniko read-only sync updates appointment edits made in Cliniko", async (
     const db = blankDb();
     await syncCliniko(db);
     updateClinikoLocationEnabled(db, "401", true);
+    await syncCliniko(db);
     updateClinikoPractitionerEnabled(db, "201", true);
 
     await syncCliniko(db);
@@ -397,7 +400,7 @@ test("Cliniko read-only sync can switch the enabled test location", async () => 
     }
 
     if (url.pathname === "/v1/patients") return jsonResponse({ patients: [], links: { next: null } });
-    if (url.pathname === "/v1/practitioners") {
+    if (url.pathname === "/v1/businesses/402/practitioners") {
       return jsonResponse({
         practitioners: [
           { links: { self: "https://mock.cliniko.test/v1/practitioners/201" }, first_name: "Ella", last_name: "Mason" }
@@ -420,16 +423,68 @@ test("Cliniko read-only sync can switch the enabled test location", async () => 
     await syncCliniko(db);
     assert.equal(db.clinikoLocations.filter((location) => location.enabled).length, 0);
     const secondLocation = db.clinikoLocations.find((location) => location.clinikoBusinessId === "402");
-    const practitioner = db.users.find((user) => user.clinikoPractitionerId === "201");
 
     const update = updateClinikoLocationEnabled(db, secondLocation.id, true);
     assert.equal(update.location.enabled, true);
+    await syncCliniko(db);
+    const practitioner = db.users.find((user) => user.clinikoPractitionerId === "201");
     updateClinikoPractitionerEnabled(db, practitioner.id, true);
 
     await syncCliniko(db);
     assert.equal(db.clinikoLocations.find((location) => location.clinikoBusinessId === "401").enabled, false);
     assert.equal(db.clinikoLocations.find((location) => location.clinikoBusinessId === "402").enabled, true);
     assert.deepEqual(appointmentBusinessFilters, ["business_id:=402"]);
+  });
+});
+
+test("Cliniko read-only sync only keeps practitioners from the enabled location", async () => {
+  const mockFetch = async (input) => {
+    const url = new URL(String(input));
+
+    if (url.pathname === "/v1/businesses") {
+      return jsonResponse({
+        businesses: [
+          { links: { self: "https://mock.cliniko.test/v1/businesses/401" }, business_name: "North Location" },
+          { links: { self: "https://mock.cliniko.test/v1/businesses/402" }, business_name: "South Location" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/businesses/401/practitioners") {
+      return jsonResponse({
+        practitioners: [
+          { links: { self: "https://mock.cliniko.test/v1/practitioners/201" }, first_name: "Ella", last_name: "Mason" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/businesses/402/practitioners") {
+      return jsonResponse({
+        practitioners: [
+          { links: { self: "https://mock.cliniko.test/v1/practitioners/202" }, first_name: "Noah", last_name: "Patel" }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/appointment_types") return jsonResponse({ appointment_types: [], links: { next: null } });
+    return jsonResponse({ links: { next: null } });
+  };
+
+  await withMockCliniko(mockFetch, async () => {
+    const db = blankDb();
+    await syncCliniko(db);
+
+    updateClinikoLocationEnabled(db, "401", true);
+    await syncCliniko(db);
+    assert.deepEqual(db.users.map((user) => user.clinikoPractitionerId), ["201"]);
+
+    updateClinikoLocationEnabled(db, "402", true);
+    await syncCliniko(db);
+    assert.deepEqual(db.users.map((user) => user.clinikoPractitionerId), ["202"]);
+    assert.equal(db.users.some((user) => user.clinikoPractitionerId === "201"), false);
   });
 });
 
@@ -447,7 +502,7 @@ test("Cliniko read-only sync requires an enabled practitioner before importing a
       });
     }
 
-    if (url.pathname === "/v1/practitioners") {
+    if (url.pathname === "/v1/businesses/401/practitioners") {
       return jsonResponse({
         practitioners: [
           { links: { self: "https://mock.cliniko.test/v1/practitioners/201" }, first_name: "Ella", last_name: "Mason" },
@@ -472,13 +527,15 @@ test("Cliniko read-only sync requires an enabled practitioner before importing a
     const setup = await syncCliniko(db);
 
     assert.equal(setup.sync.status, "connected");
-    assert.match(setup.sync.message, /Choose one Cliniko location and one Cliniko practitioner/);
+    assert.match(setup.sync.message, /Choose one Cliniko location/);
     assert.equal(db.clinikoLocations.filter((location) => location.enabled).length, 0);
     assert.equal(db.users.filter((user) => user.clinikoSyncEnabled).length, 0);
+    assert.equal(db.users.length, 0);
     assert.deepEqual(appointmentPractitionerFilters, []);
 
     updateClinikoLocationEnabled(db, "401", true);
     await syncCliniko(db);
+    assert.equal(db.users.length, 2);
     assert.deepEqual(appointmentPractitionerFilters, []);
 
     const practitioner = db.users.find((user) => user.clinikoPractitionerId === "202");
@@ -504,7 +561,7 @@ test("Cliniko read-only sync honours the fixed Brisbane start date boundary", as
       });
     }
 
-    if (url.pathname === "/v1/practitioners") {
+    if (url.pathname === "/v1/businesses/401/practitioners") {
       return jsonResponse({
         practitioners: [
           { links: { self: "https://mock.cliniko.test/v1/practitioners/201" }, first_name: "Ella", last_name: "Mason" }
@@ -527,6 +584,7 @@ test("Cliniko read-only sync honours the fixed Brisbane start date boundary", as
     const db = blankDb();
     await syncCliniko(db);
     updateClinikoLocationEnabled(db, "401", true);
+    await syncCliniko(db);
     updateClinikoPractitionerEnabled(db, "201", true);
     db.clients.push({ id: "client-old", clinikoPatientId: "8801", syncSource: "cliniko" });
     db.appointments.push({
