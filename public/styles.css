@@ -2326,17 +2326,35 @@ label {
 
 .time-selects {
   align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  min-width: 0;
+  width: min(100%, 420px);
+}
+
+.time-select-group {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(48px, 1.08fr);
   min-width: 0;
 }
 
+.time-select-separator {
+  color: #5c7080;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 1px;
+  white-space: nowrap;
+}
+
 .time-selects select {
-  flex: 0 0 72px;
+  font-weight: 750;
   min-height: 36px;
-  padding: 7px 8px;
-  width: auto;
+  min-width: 0;
+  padding: 7px 6px;
+  width: 100%;
 }
 
 .time-warning {
@@ -4516,11 +4534,13 @@ tr:last-child td {
   }
 
   .time-selects {
-    align-items: stretch;
+    align-items: center;
+    width: 100%;
   }
 
   .time-selects select {
-    flex: 1 1 64px;
+    min-height: 34px;
+    padding-inline: 5px;
   }
 
   .new-appointment-actions div {
@@ -6679,13 +6699,23 @@ textarea {
   }
 
   .calendar-booking-modal .time-selects {
-    gap: 5px;
+    gap: 4px;
   }
 
   .calendar-booking-modal .time-selects select {
-    flex: 1 1 54px;
-    min-height: 34px;
-    padding: 5px 6px;
+    font-size: 0.85rem;
+    min-height: 32px;
+    padding: 5px 4px;
+  }
+
+  .calendar-booking-modal .time-select-group {
+    gap: 4px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(42px, 1.05fr);
+  }
+
+  .calendar-booking-modal .time-select-separator {
+    font-size: 0.76rem;
+    padding: 0;
   }
 
   .calendar-booking-modal .time-warning {

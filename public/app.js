@@ -1603,13 +1603,17 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
         <div class="new-appointment-row">
           <span>Time</span>
           <div class="time-selects">
-            ${timePartSelect("startHour", hourOptions(), startTime.hour)}
-            ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
-            ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
-            <span>to</span>
-            ${timePartSelect("endHour", hourOptions(), endTime.hour)}
-            ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
-            ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+            <div class="time-select-group">
+              ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+              ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+              ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+            </div>
+            <span class="time-select-separator">to</span>
+            <div class="time-select-group">
+              ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+              ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+              ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+            </div>
           </div>
         </div>
 
@@ -3580,13 +3584,17 @@ function renderCalendarBookingModal() {
             <div class="new-appointment-row">
               <span>Time</span>
               <div class="time-selects">
-                ${timePartSelect("startHour", hourOptions(), startTime.hour)}
-                ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
-                ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
-                <span>to</span>
-                ${timePartSelect("endHour", hourOptions(), endTime.hour)}
-                ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
-                ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+                <div class="time-select-group">
+                  ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+                  ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+                  ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+                </div>
+                <span class="time-select-separator">to</span>
+                <div class="time-select-group">
+                  ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+                  ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+                  ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+                </div>
               </div>
             </div>
 
@@ -3667,13 +3675,17 @@ function renderUnavailableBlockModal() {
             <div class="new-appointment-row">
               <span>Time</span>
               <div class="time-selects">
-                ${timePartSelect("startHour", hourOptions(), startTime.hour)}
-                ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
-                ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
-                <span>to</span>
-                ${timePartSelect("endHour", hourOptions(), endTime.hour)}
-                ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
-                ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+                <div class="time-select-group">
+                  ${timePartSelect("startHour", hourOptions(), startTime.hour)}
+                  ${timePartSelect("startMinute", minuteOptions(), startTime.minute)}
+                  ${timePartSelect("startPeriod", ["AM", "PM"], startTime.period)}
+                </div>
+                <span class="time-select-separator">to</span>
+                <div class="time-select-group">
+                  ${timePartSelect("endHour", hourOptions(), endTime.hour)}
+                  ${timePartSelect("endMinute", minuteOptions(), endTime.minute)}
+                  ${timePartSelect("endPeriod", ["AM", "PM"], endTime.period)}
+                </div>
               </div>
             </div>
 
