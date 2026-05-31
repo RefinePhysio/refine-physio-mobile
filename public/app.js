@@ -1557,7 +1557,7 @@ function renderRebookInstructionCard(client) {
     <div class="rebook-instruction-card">
       <div>
         <strong>Rebook ${escapeHtml(client.name)}</strong>
-        <span>${selectedLabel ? `Selected ${escapeHtml(selectedLabel)}. Check details, then create the appointment.` : "Choose an available time on the calendar. The new appointment will default to 1 hour."}</span>
+        <span>${selectedLabel ? `Selected ${escapeHtml(selectedLabel)}. Check details, then create the appointment.` : "Tap a blank time on the calendar. The new appointment will default to 1 hour."}</span>
       </div>
       <button type="button" class="secondary" data-action="cancel-rebook">Cancel</button>
     </div>
@@ -1742,8 +1742,6 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
         data-start-local="${escapeHtml(startLocal)}"
         aria-label="Book ${escapeHtml(client.name)} at ${formatSlotTime(slot)} on ${escapeHtml(day.label)}"
       >
-        <span>Book</span>
-        <small>${formatSlotTime(slot)}</small>
       </button>
     </div>
   `;

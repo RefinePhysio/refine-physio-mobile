@@ -3679,40 +3679,43 @@ label {
 }
 
 .calendar-gap {
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: rgba(7, 95, 136, 0);
-  display: grid;
-  font-size: 0.68rem;
-  font-weight: 850;
-  gap: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: transparent;
+  display: block;
   height: calc(var(--slot-height) - 1px);
-  line-height: 1;
   min-height: calc(var(--slot-height) - 1px);
-  place-content: center;
-  padding: 1px 3px;
+  padding: 0;
+  position: relative;
   width: 100%;
 }
 
 .rebook-slot-section .calendar-gap {
-  background: rgba(227, 247, 251, 0.68);
-  border-color: rgba(78, 183, 204, 0.28);
-  color: #075f88;
+  background: transparent;
 }
 
-.calendar-gap small {
-  color: currentColor;
-  font-size: 0.64rem;
-  font-weight: 800;
+.calendar-gap::after {
+  content: "";
 }
 
 .calendar-gap:hover,
 .calendar-gap:focus-visible {
   background: rgba(8, 126, 164, 0.18);
-  color: var(--brand-dark);
   outline: 2px solid rgba(8, 126, 164, 0.24);
   outline-offset: -2px;
+}
+
+.calendar-gap:hover::after,
+.calendar-gap:focus-visible::after {
+  color: var(--brand-dark);
+  content: "Book";
+  font-size: 0.68rem;
+  font-weight: 900;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .calendar-busy {
