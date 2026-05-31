@@ -1,4 +1,4 @@
-const CACHE_NAME = "refine-physio-shell-v31";
+const CACHE_NAME = "refine-physio-shell-v32";
 const APP_SHELL = [
   "/",
   "/index.html",

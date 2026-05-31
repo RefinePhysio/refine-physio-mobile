@@ -4245,13 +4245,14 @@ function isAdminReportUploadType(type) {
 }
 
 function renderApprovalCard(request) {
-  const tone = request.status === "approved" ? "" : request.status === "declined" ? "coral" : "gold";
   const isAdmin = state.data.currentUser.role === "admin";
+  const pendingForPractitioner = !isAdmin && ["pending", "waiting"].includes(request.status);
+  const tone = request.status === "approved" ? "" : request.status === "declined" ? "coral" : pendingForPractitioner ? "blue" : "gold";
   return `
     <article class="card compact approval-card">
       <div class="section-heading">
         <h4>${escapeHtml(request.approvalNeedType || request.type)}</h4>
-        ${statusPill(approvalStatusLabel(request.status), tone)}
+        ${statusPill(approvalStatusLabel(request.status, { sentLabel: pendingForPractitioner }), tone)}
       </div>
       <div class="detail-list">
         <div><strong>Client</strong>${escapeHtml(clientName(request.clientId))}</div>
@@ -5682,7 +5683,7 @@ async function submitApproval(event) {
   state.approvalAppointmentId = "";
   state.approvalClientId = "";
   event.currentTarget.reset();
-  toast("Approval request sent to admin");
+  toast("Approval sent");
   await loadData();
 }
 
@@ -8391,7 +8392,8 @@ function activeApprovalRequests(requests) {
   return sortApprovalRequests(requests).filter((request) => !["approved", "declined"].includes(request.status));
 }
 
-function approvalStatusLabel(status) {
+function approvalStatusLabel(status, options = {}) {
+  if (options.sentLabel && ["pending", "waiting"].includes(status)) return "Approval sent";
   return {
     pending: "Currently waiting for approval",
     waiting: "Currently waiting for approval",
