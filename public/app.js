@@ -1355,7 +1355,7 @@ function renderUpdateMailboxCard(item) {
         <div><strong>Received</strong>${formatDateTime(item.createdAt)}</div>
         <div><strong>Message</strong>${escapeHtml(item.message || "No message supplied.")}</div>
       </div>
-      ${isUnread ? `<div class="mini-actions"><button type="button" class="secondary">Mark as read</button></div>` : ""}
+      ${isUnread ? `<div class="mini-actions"><button type="button" class="secondary" data-action="notification-read" data-id="${escapeHtml(item.id)}">Mark as read</button></div>` : ""}
     </article>
   `;
 }
@@ -4911,7 +4911,10 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-action='notification-read']").forEach((card) => {
-    const readUpdate = () => markNotificationRead(card.dataset.id);
+    const readUpdate = (event) => {
+      event?.stopPropagation();
+      markNotificationRead(card.dataset.id);
+    };
     card.addEventListener("click", readUpdate);
     card.addEventListener("keydown", (event) => {
       if (!["Enter", " "].includes(event.key)) return;
