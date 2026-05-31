@@ -2440,11 +2440,13 @@ label {
 }
 
 .rebook-booking-popover {
+  left: 50%;
   max-height: calc(100% - 24px);
   overflow: auto;
   position: absolute;
-  right: 12px;
+  right: auto;
   top: 12px;
+  transform: translateX(-50%);
   width: min(520px, calc(100% - 24px));
   z-index: 12;
 }
@@ -5331,6 +5333,7 @@ tr:last-child td {
     position: fixed;
     right: 12px;
     top: auto;
+    transform: none;
     width: auto;
     z-index: 45;
   }
