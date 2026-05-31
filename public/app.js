@@ -3400,8 +3400,9 @@ function renderAppointmentDetailModal() {
   const nextAppointment = nextAppointmentForClient(appointment);
   const durationMinutes = appointmentDurationMinutes(appointment);
   const isRescheduling = state.calendarAppointmentMode === "reschedule";
-  const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
-  const showReport = appointmentRequiresReport(appointment);
+  const clinicalActions = appointmentClinicalActions(appointment);
+  const showTreatmentNote = clinicalActions.showTreatmentNote;
+  const showReport = clinicalActions.showReport;
   const readOnly = appointmentIsClinikoReadOnly(appointment);
   const appointmentAddress = appointment.address || client.address || "";
   const appointmentEmail = client.email || "";
@@ -3495,8 +3496,9 @@ function renderAppointmentDetailModal() {
           <aside class="appointment-modal-actions" aria-label="Appointment actions">
             ${showTreatmentNote || showReport ? `
               <div class="appointment-action-group appointment-action-main">
-                ${showTreatmentNote ? `<button type="button" class="appointment-primary-action" data-action="open-note" data-id="${escapeHtml(appointment.id)}">Open notes</button>` : ""}
-                ${showReport ? `<button type="button" class="appointment-primary-action" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">Open report</button>` : ""}
+                <span class="appointment-action-label">Clinical</span>
+                ${showTreatmentNote ? `<button type="button" class="appointment-primary-action" data-action="open-note" data-id="${escapeHtml(appointment.id)}">${escapeHtml(clinicalActions.noteLabel)}</button>` : ""}
+                ${showReport ? `<button type="button" class="appointment-primary-action" data-action="open-appointment-report" data-id="${escapeHtml(appointment.id)}">${escapeHtml(clinicalActions.reportLabel)}</button>` : ""}
               </div>
             ` : ""}
             <div class="appointment-action-group appointment-action-attendance">
@@ -6759,7 +6761,7 @@ function renderCalendarCompletionText(appointment) {
 }
 
 function appointmentTypeColour(appointment) {
-  const type = `${appointment.appointmentType || ""} ${appointment.recurrence || ""}`.toLowerCase();
+  const type = appointmentBookingText(appointment);
   if (type.includes("equipment")) {
     return {
       eventTone: "is-type-equipment-trial",
@@ -8057,6 +8059,21 @@ function appointmentRequiresReport(appointment) {
   return isInitialPhysioReportAppointment(appointment) || isEquipmentTrialReportAppointment(appointment);
 }
 
+function appointmentClinicalActions(appointment) {
+  const report = exactReportForAppointment(appointment);
+  const note = noteForAppointment(appointment.id);
+  const showReport = appointmentRequiresReport(appointment);
+  const showTreatmentNote = appointmentRequiresTreatmentNote(appointment);
+  const isRecognisedClinicalType = showReport || showTreatmentNote;
+
+  return {
+    showReport: showReport || !isRecognisedClinicalType,
+    showTreatmentNote: showTreatmentNote || !isRecognisedClinicalType,
+    reportLabel: report ? "Open report" : "Start report",
+    noteLabel: note?.status === "signed" ? "View notes" : note ? "Continue notes" : "Start notes"
+  };
+}
+
 function isInitialPhysioAssessment(appointment) {
   return isInitialPhysioReportAppointment(appointment);
 }
@@ -8086,7 +8103,14 @@ function appointmentMatchesPhysioFundingType(appointment, visitStage) {
 }
 
 function appointmentBookingText(appointment) {
-  return `${appointment.appointmentType || ""} ${appointment.recurrence || ""}`.toLowerCase();
+  return [
+    appointment.appointmentType,
+    appointment.recurrence,
+    appointment.serviceType,
+    appointment.type,
+    appointment.clinikoAppointmentType,
+    appointment.clinikoAppointmentTypeName
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function selectedOutcomeMeasuresForAppointment(appointmentId, fields) {
