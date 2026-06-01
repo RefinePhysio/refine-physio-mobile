@@ -2560,10 +2560,12 @@ function renderReports() {
 function renderReportSignaturePanel(contractor = {}, existingReport = null) {
   const currentUser = state.data.currentUser || {};
   const isOwnSignature = contractor.id === currentUser.id;
-  const savedSignature = isOwnSignature ? currentUser.signatureDataUrl || "" : "";
-  const hasSignature = isOwnSignature ? Boolean(savedSignature) : Boolean(contractor.hasSignature);
+  const canManageSignature = isOwnSignature || currentUser.role === "admin";
+  const savedSignature = isOwnSignature ? currentUser.signatureDataUrl || "" : contractor.signatureDataUrl || "";
+  const hasSignature = Boolean(savedSignature || contractor.hasSignature);
   const printedName = existingReport?.signature || contractor.name || currentUser.name || "";
   const title = professionalTitleForUser(contractor);
+  const signatureOwnerLabel = isOwnSignature ? "your" : `${contractor.name || "this therapist"}'s`;
 
   return `
     <section class="clinical-block report-signature-panel full">
@@ -2571,7 +2573,7 @@ function renderReportSignaturePanel(contractor = {}, existingReport = null) {
         <h4>Signature</h4>
         ${statusPill(hasSignature ? "saved signature" : "typed name only", hasSignature ? "blue" : "gold")}
       </div>
-      <p class="form-hint">The final PDF will show the referral thank-you message, Warm regards, your saved drawn signature, then your name and title.</p>
+      <p class="form-hint">The final PDF will show the referral thank-you message, Warm regards, ${escapeHtml(signatureOwnerLabel)} saved drawn signature, then the name and title.</p>
       ${input("signature", "Name printed on report", "text", false, "full", printedName)}
       <div class="signature-preview-card">
         <span>${escapeHtml(REPORT_CLOSING_PREVIEW_TEXT())}</span>
@@ -2582,17 +2584,17 @@ function renderReportSignaturePanel(contractor = {}, existingReport = null) {
         <strong>${escapeHtml(printedName)}</strong>
         <span>${escapeHtml(title)}</span>
       </div>
-      ${isOwnSignature ? `
+      ${canManageSignature ? `
         <div class="signature-pad-wrap">
-          <canvas id="signature-pad" width="520" height="160" aria-label="Draw signature"></canvas>
+          <canvas id="signature-pad" width="520" height="160" aria-label="Draw signature" data-user-id="${escapeHtml(contractor.id || currentUser.id)}"></canvas>
           <div class="mini-actions">
             <button type="button" class="secondary" data-action="signature-clear-canvas">Clear drawing</button>
             <button type="button" data-action="signature-save">Save signature</button>
-            ${savedSignature ? `<button type="button" class="secondary" data-action="signature-clear-saved">Remove saved signature</button>` : ""}
+            ${savedSignature ? `<button type="button" class="secondary" data-action="signature-clear-saved" data-user-id="${escapeHtml(contractor.id || currentUser.id)}">Remove saved signature</button>` : ""}
           </div>
         </div>
       ` : `
-        <div class="empty-inline">Only the practitioner can add or change their own drawn signature.</div>
+        <div class="empty-inline">Only admin or the practitioner can add or change this drawn signature.</div>
       `}
     </section>
   `;
@@ -5323,8 +5325,8 @@ function bindViewEvents() {
   document.querySelector("[data-action='signature-clear-canvas']")?.addEventListener("click", () => {
     clearSignaturePad();
   });
-  document.querySelector("[data-action='signature-clear-saved']")?.addEventListener("click", () => {
-    void clearSavedSignature();
+  document.querySelector("[data-action='signature-clear-saved']")?.addEventListener("click", (event) => {
+    void clearSavedSignature(event.currentTarget);
   });
 
   document.querySelectorAll("input[name^='field_equipmentTrial_'][name$='_chosenModel'], input[name^='field_equipmentTrial_'][name$='_title']").forEach((inputEl) => {
@@ -6271,11 +6273,11 @@ async function saveSignatureFromPad(options = {}) {
 
   try {
     const signature = signaturePadDataUrl(canvas);
-    const result = await fetchJson("/api/users/me/signature", {
+    const result = await fetchJson(signatureEndpointForUser(canvas.dataset.userId), {
       method: "PATCH",
       body: signature
     });
-    applyUpdatedCurrentUser(result.user);
+    applyUpdatedUser(result.user);
     clearSignaturePad();
     if (!options.quiet) {
       toast("Signature saved");
@@ -6287,13 +6289,15 @@ async function saveSignatureFromPad(options = {}) {
   }
 }
 
-async function clearSavedSignature() {
+async function clearSavedSignature(button = null) {
   try {
-    const result = await fetchJson("/api/users/me/signature", {
+    const canvas = document.querySelector("#signature-pad");
+    const targetUserId = button?.dataset?.userId || canvas?.dataset?.userId || state.data.currentUser.id;
+    const result = await fetchJson(signatureEndpointForUser(targetUserId), {
       method: "PATCH",
       body: { clear: true }
     });
-    applyUpdatedCurrentUser(result.user);
+    applyUpdatedUser(result.user);
     clearSignaturePad();
     toast("Saved signature removed");
     render();
@@ -6317,9 +6321,18 @@ function signaturePadDataUrl(canvas) {
   };
 }
 
-function applyUpdatedCurrentUser(user) {
+function signatureEndpointForUser(userId) {
+  const targetUserId = String(userId || state.data.currentUser.id || "");
+  return targetUserId && targetUserId !== state.data.currentUser.id
+    ? `/api/users/${encodeURIComponent(targetUserId)}/signature`
+    : "/api/users/me/signature";
+}
+
+function applyUpdatedUser(user) {
   if (!user || !state.data) return;
-  state.data.currentUser = { ...state.data.currentUser, ...user };
+  if (state.data.currentUser?.id === user.id) {
+    state.data.currentUser = { ...state.data.currentUser, ...user };
+  }
   state.data.users = (state.data.users || []).map((item) => item.id === user.id ? { ...item, ...user } : item);
   state.data.contractors = (state.data.contractors || []).map((item) => item.id === user.id ? { ...item, ...user } : item);
 }

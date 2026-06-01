@@ -83,8 +83,7 @@ const reportTemplates = [
       "Assessment",
       "Treatment",
       "Recommendations",
-      "Plan",
-      "Therapist Signature"
+      "Plan"
     ]
   },
   {
@@ -100,8 +99,7 @@ const reportTemplates = [
       "Recommendations",
       "Equipment List",
       "Funding Recommendations",
-      "Supplier Information",
-      "Therapist Signature"
+      "Supplier Information"
     ]
   }
 ];
@@ -579,7 +577,7 @@ async function routeApi(req, res, url) {
 
   if (method === "PATCH" && url.pathname === "/api/users/me/signature") {
     const body = await readJsonBody(req);
-    const result = updateOwnSignature(db, auth.user.id, body);
+    const result = updateUserSignature(db, auth.user.id, body, auth.user.id);
     if (result.error) return sendJson(res, result.status, { error: result.error });
     await writeDb(db);
     sendJson(res, 200, { user: publicUser(result.user, { includeSignature: true }) });
@@ -1064,6 +1062,16 @@ async function routeApi(req, res, url) {
     return;
   }
 
+  if (method === "PATCH" && parts[1] === "users" && parts[2] && parts[3] === "signature") {
+    if (!requireRole(res, auth.user, ["admin"])) return;
+    const body = await readJsonBody(req);
+    const result = updateUserSignature(db, parts[2], body, auth.user.id);
+    if (result.error) return sendJson(res, result.status, { error: result.error });
+    await writeDb(db);
+    sendJson(res, 200, { user: publicUser(result.user, { includeSignature: true }) });
+    return;
+  }
+
   if (method === "PATCH" && parts[1] === "users" && parts[2]) {
     if (!requireRole(res, auth.user, ["admin"])) return;
     const body = await readJsonBody(req);
@@ -1223,7 +1231,7 @@ async function setUserPassword(db, userId, password, actorId) {
   return { user };
 }
 
-function updateOwnSignature(db, userId, body = {}) {
+function updateUserSignature(db, userId, body = {}, actorId = userId) {
   const user = db.users.find((item) => item.id === userId);
   if (!user) return { status: 404, error: "User not found." };
 
@@ -1234,7 +1242,7 @@ function updateOwnSignature(db, userId, body = {}) {
     user.signatureHeight = 0;
     user.signatureUpdatedAt = "";
     user.updatedAt = new Date().toISOString();
-    logActivity(db, user.id, "cleared_signature", "user", user.id);
+    logActivity(db, actorId, "cleared_signature", "user", user.id);
     return { user };
   }
 
@@ -1248,7 +1256,7 @@ function updateOwnSignature(db, userId, body = {}) {
   user.signatureHeight = Math.max(1, Math.min(500, Number(body.height || 160) || 160));
   user.signatureUpdatedAt = new Date().toISOString();
   user.updatedAt = user.signatureUpdatedAt;
-  logActivity(db, user.id, "saved_signature", "user", user.id);
+  logActivity(db, actorId, "saved_signature", "user", user.id);
   return { user };
 }
 
@@ -1686,8 +1694,9 @@ function buildBootstrap(db, userId) {
 
   return {
     currentUser: currentUserPublic,
-    users: visibleUsers.map(publicUser),
-    contractors: (isOperations ? workspaceContractors : activeUsers.filter((user) => user.id === currentUser.id)).map(publicUser),
+    users: visibleUsers.map((user) => publicUser(user, { includeSignature: isAdmin })),
+    contractors: (isOperations ? workspaceContractors : activeUsers.filter((user) => user.id === currentUser.id))
+      .map((user) => publicUser(user, { includeSignature: isAdmin || user.id === currentUser.id })),
     caseManagers: isOperations ? (db.caseManagers || []).filter((item) => item.isActive !== false) : [],
     clients: scrubCaseManagerDetails ? clients.map(stripCaseManagerFromClient) : clients,
     referrals: scrubCaseManagerDetails ? referrals.map(stripCaseManagerFromReferral) : referrals,
@@ -3228,7 +3237,7 @@ function normalizeDesignedSectionsForPages(sections) {
 
 function designedSignatureSection(context) {
   return {
-    title: "Therapist Signature",
+    title: "",
     intro: REPORT_CLOSING_MESSAGE,
     signatureBlock: {
       image: context.signatureImage,
@@ -3411,9 +3420,13 @@ function estimateDesignedSectionHeight(section) {
 function drawDesignedSection(page, section, startY) {
   let y = startY;
   const geometry = designedSectionGeometry(page);
-  page.content.push(drawRect(geometry.x, y - 24, geometry.width, 24, "e9f8fb"));
-  page.content.push(drawText(section.title, geometry.x + 10, y - 8, 12, "F2", "087f9a"));
-  y -= 38;
+  if (section.title) {
+    page.content.push(drawRect(geometry.x, y - 24, geometry.width, 24, "e9f8fb"));
+    page.content.push(drawText(section.title, geometry.x + 10, y - 8, 12, "F2", "087f9a"));
+    y -= 38;
+  } else {
+    y -= 8;
+  }
 
   if (section.signatureBlock) {
     const introLines = section.intro ? wrapDesignedText(section.intro, 88) : [];
