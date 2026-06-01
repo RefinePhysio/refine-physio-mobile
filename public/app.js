@@ -1481,7 +1481,7 @@ function renderMessageForm(toUserId, buttonText) {
 function renderPractitionerCalendar(appointments) {
   const practitioner = currentCalendarPractitioner();
   if (!practitioner) return emptyState("No practitioner is selected.");
-  const days = calendarDays(state.calendarMode);
+  const days = calendarDays(effectiveCalendarMode());
   const slots = calendarSlots(appointments, days, practitioner);
   const visibleAppointments = appointments.filter((appointment) =>
     appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
@@ -1788,7 +1788,7 @@ function renderRebookAppointmentForm(data, selectedRebookClient) {
 function renderRebookSlotCalendar(client) {
   const appointments = sortAppointments(appointmentsForPractitioner(state.data.appointments));
   const practitioner = currentCalendarPractitioner();
-  const days = calendarDays(state.calendarMode);
+  const days = calendarDays(effectiveCalendarMode());
   const slots = calendarSlots(appointments, days, practitioner);
   const visibleAppointments = appointments.filter((appointment) =>
     appointment.status !== "cancelled" && days.some((day) => day.key === brisbaneDateKey(appointment.startsAt))
@@ -1867,6 +1867,8 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
 function renderSchedulerToolbar(title, buttonType = false) {
   const typeAttr = buttonType ? ' type="button"' : "";
   const selectedDate = selectedCalendarDateKey();
+  const mode = effectiveCalendarMode();
+  const rangeLabel = calendarRangeLabel(mode);
   return `
     <div class="scheduler-toolbar">
       <select class="scheduler-location" aria-label="Calendar location">
@@ -1874,14 +1876,15 @@ function renderSchedulerToolbar(title, buttonType = false) {
       </select>
       <strong>${escapeHtml(title)}</strong>
       <div class="calendar-date-nav" aria-label="Calendar date">
-        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="-1" aria-label="Previous ${state.calendarMode === "week" ? "week" : "day"}">&lt;</button>
+        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="-1" aria-label="Previous ${mode === "week" ? "week" : "day"}">&lt;</button>
         <input type="date" value="${escapeHtml(selectedDate)}" data-action="calendar-date-input" aria-label="Choose calendar date">
-        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="1" aria-label="Next ${state.calendarMode === "week" ? "week" : "day"}">&gt;</button>
+        <span class="calendar-range-label" aria-hidden="true">${escapeHtml(rangeLabel)}</span>
+        <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="1" aria-label="Next ${mode === "week" ? "week" : "day"}">&gt;</button>
         <button${typeAttr} class="today-jump" data-action="calendar-today" aria-label="Jump to today's date">Today</button>
       </div>
       <div class="calendar-toggle" aria-label="Calendar view">
-        <button${typeAttr} class="${state.calendarMode === "day" ? "active" : ""}" data-action="calendar-mode" data-mode="day">Daily</button>
-        <button${typeAttr} class="${state.calendarMode === "week" ? "active" : ""}" data-action="calendar-mode" data-mode="week">Weekly</button>
+        <button${typeAttr} class="${mode === "day" ? "active" : ""}" data-action="calendar-mode" data-mode="day">Daily</button>
+        <button${typeAttr} class="${mode === "week" ? "active" : ""}" data-action="calendar-mode" data-mode="week">Weekly</button>
       </div>
     </div>
   `;
@@ -1970,7 +1973,7 @@ function renderMiniMonth(offset) {
   const startOffset = (firstDay.getUTCDay() + 6) % 7;
   const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const todayKey = dateKeyFromParts(today);
-  const selectedKeys = new Set(calendarDays(state.calendarMode).map((day) => day.key));
+  const selectedKeys = new Set(calendarDays(effectiveCalendarMode()).map((day) => day.key));
   const cells = [];
 
   for (let i = 0; i < startOffset; i += 1) cells.push("");
@@ -4897,7 +4900,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-action='calendar-shift']").forEach((button) => {
     button.addEventListener("click", () => {
       const direction = Number(button.dataset.direction || 1);
-      const stepDays = state.calendarMode === "week" ? 7 : 1;
+      const stepDays = effectiveCalendarMode() === "week" ? 7 : 1;
       setCalendarDateKey(addDaysToDateKey(selectedCalendarDateKey(), direction * stepDays));
       render();
     });
@@ -6808,6 +6811,38 @@ function datePartsFromKey(key) {
   if (!validDateKey(key)) return brisbaneParts(new Date());
   const [year, month, day] = key.split("-").map(Number);
   return { year, month, day };
+}
+
+function isMobileCalendarViewport() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 719px)").matches;
+}
+
+function effectiveCalendarMode() {
+  return isMobileCalendarViewport() ? "week" : state.calendarMode;
+}
+
+function calendarRangeLabel(mode = effectiveCalendarMode()) {
+  const days = calendarDays(mode);
+  if (!days.length) return "";
+  if (days.length === 1) return days[0].heading;
+
+  const first = datePartsFromKey(days[0].key);
+  const last = datePartsFromKey(days[days.length - 1].key);
+  const firstDate = new Date(Date.UTC(first.year, first.month - 1, first.day));
+  const lastDate = new Date(Date.UTC(last.year, last.month - 1, last.day));
+  const firstOptions = {
+    day: "numeric",
+    timeZone: "Australia/Brisbane"
+  };
+  if (first.month !== last.month || first.year !== last.year) firstOptions.month = "short";
+  const firstLabel = new Intl.DateTimeFormat("en-AU", firstOptions).format(firstDate);
+  const lastLabel = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Australia/Brisbane"
+  }).format(lastDate);
+  return `${firstLabel} - ${lastLabel}`;
 }
 
 function calendarDays(mode) {
