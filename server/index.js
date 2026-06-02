@@ -229,6 +229,7 @@ function normalizeDb(db) {
   db.caseManagers ||= [];
   db.referrals ||= [];
   db.appointments ||= [];
+  db.unavailableBlocks ||= [];
   db.archivedAppointments ||= [];
   db.treatmentNotes ||= [];
   db.reports ||= [];
@@ -306,6 +307,7 @@ function maybeResetTestClinikoDataForRealSync(db) {
     "caseManagers",
     "referrals",
     "appointments",
+    "unavailableBlocks",
     "archivedAppointments",
     "treatmentNotes",
     "reports",
@@ -360,6 +362,7 @@ function emptyDb() {
     caseManagers: [],
     referrals: [],
     appointments: [],
+    unavailableBlocks: [],
     archivedAppointments: [],
     treatmentNotes: [],
     reports: [],
@@ -1655,6 +1658,9 @@ function buildBootstrap(db, userId) {
   const appointments = isOperations
     ? activePhysioAppointments
     : activePhysioAppointments.filter((appointment) => appointment.contractorId === currentUser.id);
+  const unavailableBlocks = isOperations
+    ? (db.unavailableBlocks || []).filter((block) => physioContractorIds.has(block.contractorId))
+    : (db.unavailableBlocks || []).filter((block) => block.contractorId === currentUser.id);
   const treatmentNotes = isOperations
     ? db.treatmentNotes.filter((note) => physioContractorIds.has(note.contractorId) || note.discipline === "Physiotherapy")
     : db.treatmentNotes.filter((note) => note.contractorId === currentUser.id);
@@ -1701,6 +1707,7 @@ function buildBootstrap(db, userId) {
     clients: scrubCaseManagerDetails ? clients.map(stripCaseManagerFromClient) : clients,
     referrals: scrubCaseManagerDetails ? referrals.map(stripCaseManagerFromReferral) : referrals,
     appointments,
+    unavailableBlocks,
     archivedAppointments: isOperations ? archivedPhysioAppointments : [],
     treatmentNotes: treatmentNotesForRole,
     reports: reportsForRole,

@@ -15,6 +15,8 @@ const collectionKeys = {
   "/daily_availabilities": "daily_availabilities",
   "/appointment_types": "appointment_types",
   "/individual_appointments": "individual_appointments",
+  "/unavailable_blocks": "unavailable_blocks",
+  "/unavailable_block_types": "unavailable_block_types",
   "/treatment_notes": "treatment_notes",
   "/patient_attachments": "patient_attachments"
 };
@@ -114,6 +116,7 @@ export function clinikoEndpointSummary() {
     practitionerWorkingHours: "GET /practitioners/{practitioner_id}/daily_availabilities filtered by active business_id",
     appointmentTypes: "GET /appointment_types, GET /appointment_types/{id}",
     appointments: "GET /individual_appointments filtered by business_id, practitioner_id, and date range; optional POST /individual_appointments for app-created bookings; optional PATCH /individual_appointments/{id} for appointment time/type write-back.",
+    unavailableBlocks: "GET /unavailable_blocks and GET /unavailable_block_types filtered by business_id, practitioner_id, and date range. Display-only Cliniko blocks are shown on the app calendar and stop bookings in that blocked time.",
     treatmentNotes: "Not enabled in Step 4 read-only sync.",
     patientAttachments: "Optional report and completed treatment note PDF upload: GET /patients/{patient_id}/attachment_presigned_post, POST S3 presigned URL, POST /patient_attachments.",
     webhooks: "No official Cliniko webhook endpoint found in the public API docs; use scheduled polling unless Cliniko support confirms otherwise."
@@ -230,6 +233,15 @@ async function listResource(path, key = "", maxPages = config().maxPages) {
   return items;
 }
 
+async function listOptionalResource(path, key = "", maxPages = config().maxPages) {
+  try {
+    return await listResource(path, key, maxPages);
+  } catch (error) {
+    if (error?.status === 400 || error?.status === 404) return [];
+    throw error;
+  }
+}
+
 function appointmentSyncPath(businessId = "", practitionerId = "") {
   const { from, to } = appointmentSyncWindow();
   const params = new URLSearchParams({
@@ -241,6 +253,19 @@ function appointmentSyncPath(businessId = "", practitionerId = "") {
   if (businessId) params.append("q[]", `business_id:=${businessId}`);
   if (practitionerId) params.append("q[]", `practitioner_id:=${practitionerId}`);
   return `/individual_appointments?${params.toString()}`;
+}
+
+function unavailableBlockSyncPath(businessId = "", practitionerId = "") {
+  const { from, to } = appointmentSyncWindow();
+  const params = new URLSearchParams({
+    per_page: "100",
+    sort: "starts_at:asc"
+  });
+  params.append("q[]", `starts_at:<=${to}`);
+  params.append("q[]", `ends_at:>=${from}`);
+  if (businessId) params.append("q[]", `business_id:=${businessId}`);
+  if (practitionerId) params.append("q[]", `practitioner_id:=${practitionerId}`);
+  return `/unavailable_blocks?${params.toString()}`;
 }
 
 function appointmentSyncWindow() {
@@ -317,9 +342,11 @@ function ensureCollections(db) {
   db.clients ||= [];
   db.referrals ||= [];
   db.appointments ||= [];
+  db.unavailableBlocks ||= [];
   db.treatmentNotes ||= [];
   db.reports ||= [];
   db.appointmentTypes ||= [];
+  db.unavailableBlockTypes ||= [];
   db.clinikoLocations ||= [];
   db.clinikoSyncLogs ||= [];
   db.syncErrors ||= [];
@@ -330,14 +357,21 @@ function ensureCollections(db) {
 }
 
 function pruneClinikoRecordsBeforeStart(db, startIso) {
-  if (!startIso) return { appointments: 0, clients: 0 };
+  if (!startIso) return { appointments: 0, clients: 0, unavailableBlocks: 0 };
   const startMs = new Date(startIso).getTime();
-  if (!Number.isFinite(startMs)) return { appointments: 0, clients: 0 };
+  if (!Number.isFinite(startMs)) return { appointments: 0, clients: 0, unavailableBlocks: 0 };
 
   const beforeCount = db.appointments.length;
   db.appointments = db.appointments.filter((appointment) => {
     if (appointment.syncSource !== "cliniko") return true;
     const startsAtMs = new Date(appointment.startsAt || "").getTime();
+    return !Number.isFinite(startsAtMs) || startsAtMs >= startMs;
+  });
+
+  const unavailableBeforeCount = db.unavailableBlocks.length;
+  db.unavailableBlocks = db.unavailableBlocks.filter((block) => {
+    if (block.syncSource !== "cliniko") return true;
+    const startsAtMs = new Date(block.startsAt || "").getTime();
     return !Number.isFinite(startsAtMs) || startsAtMs >= startMs;
   });
 
@@ -355,8 +389,33 @@ function pruneClinikoRecordsBeforeStart(db, startIso) {
 
   return {
     appointments: beforeCount - db.appointments.length,
-    clients: clientBeforeCount - db.clients.length
+    clients: clientBeforeCount - db.clients.length,
+    unavailableBlocks: unavailableBeforeCount - db.unavailableBlocks.length
   };
+}
+
+function removeMissingClinikoUnavailableBlocks(db, incomingClinikoIds, enabledBusinessIds, enabledPractitionerIds) {
+  const incomingIds = new Set(incomingClinikoIds.map(String).filter(Boolean));
+  const businessIds = new Set(enabledBusinessIds.map(String));
+  const practitionerIds = new Set(enabledPractitionerIds.map(String));
+  const { fromMs, toMs } = appointmentSyncWindow();
+  const beforeCount = db.unavailableBlocks.length;
+
+  db.unavailableBlocks = (db.unavailableBlocks || []).filter((block) => {
+    if (block.syncSource !== "cliniko") return true;
+    if (incomingIds.has(String(block.clinikoUnavailableBlockId || ""))) return true;
+    if (!businessIds.has(String(block.clinikoBusinessId || ""))) return true;
+    if (!practitionerIds.has(String(block.clinikoPractitionerId || ""))) return true;
+
+    const startsAtMs = new Date(block.startsAt || "").getTime();
+    const endsAtMs = new Date(block.endsAt || "").getTime();
+    const inWindow = Number.isFinite(startsAtMs) && Number.isFinite(endsAtMs)
+      ? startsAtMs <= toMs && endsAtMs >= fromMs
+      : true;
+    return !inWindow;
+  });
+
+  return beforeCount - db.unavailableBlocks.length;
 }
 
 function markMissingClinikoAppointmentsOutOfScope(db, incomingClinikoIds, enabledBusinessIds, enabledPractitionerIds) {
@@ -717,6 +776,19 @@ function mapClinikoAppointmentType(type) {
   };
 }
 
+function mapClinikoUnavailableBlockType(type) {
+  const typeId = linkedId(type);
+  return {
+    id: `unavailable-type-cliniko-${typeId}`,
+    clinikoUnavailableBlockTypeId: typeId,
+    name: type.name || "Unavailable",
+    color: type.color || "",
+    archivedAt: type.archived_at || "",
+    updatedAt: type.updated_at || "",
+    syncStatus: "synced"
+  };
+}
+
 function practitionerDailyAvailabilityPath(practitionerId, businessId) {
   const params = new URLSearchParams({ per_page: "100" });
   if (businessId) params.append("q[]", `business_id:=${businessId}`);
@@ -887,6 +959,51 @@ function clinikoPractitionerHasLocalWork(db, userId) {
   );
 }
 
+function mapClinikoUnavailableBlock(block, db) {
+  const clinikoId = linkedId(block);
+  const practitionerId = linkedIdFromRecord(block, "practitioner");
+  const businessId = linkedIdFromRecord(block, "business");
+  const typeId = linkedIdFromRecord(block, "unavailable_block_type");
+  const contractor = db.users.find((user) => String(user.clinikoPractitionerId || "") === practitionerId);
+  const location = db.clinikoLocations.find((item) => String(item.clinikoBusinessId || "") === businessId);
+  const blockType = db.unavailableBlockTypes.find((item) => String(item.clinikoUnavailableBlockTypeId || "") === typeId);
+  const startsAt = block.starts_at || "";
+  const endsAt = block.ends_at || "";
+  const label = blockType?.name || block.unavailable_block_type?.name || block.name || "Unavailable";
+  const note = block.notes || block.note || block.description || "";
+
+  if (!clinikoId || !contractor || !startsAt || !endsAt || block.archived_at || block.deleted_at) return null;
+
+  return {
+    id: `unavailable-cliniko-${clinikoId}`,
+    clinikoUnavailableBlockId: clinikoId,
+    clinikoUnavailableBlockTypeId: typeId,
+    clinikoBusinessId: businessId,
+    clinikoLocationId: location?.id || "",
+    clinikoPractitionerId: practitionerId,
+    contractorId: contractor.id,
+    kind: normaliseLocationText(`${label} ${note}`).includes("travel") ? "travel" : "unavailable",
+    label,
+    note,
+    startsAt,
+    endsAt,
+    startsAtLocal: brisbaneLocalDateTimeFromIso(startsAt),
+    endsAtLocal: brisbaneLocalDateTimeFromIso(endsAt),
+    readOnly: true,
+    syncSource: "cliniko",
+    syncStatus: "synced",
+    clinikoStatus: "synced",
+    clinikoUpdatedAt: block.updated_at || "",
+    createdAt: block.created_at || new Date().toISOString()
+  };
+}
+
+function brisbaneLocalDateTimeFromIso(value) {
+  const date = new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Date(date.getTime() + 10 * 60 * 60 * 1000).toISOString().slice(0, 16);
+}
+
 function mapClinikoAppointment(appointment, db) {
   const clinikoId = linkedId(appointment);
   const patientId = linkedIdFromRecord(appointment, "patient");
@@ -948,13 +1065,15 @@ export async function syncCliniko(db) {
 
   const startedAt = new Date().toISOString();
   try {
-    const [businesses, appointmentTypes] = await Promise.all([
+    const [businesses, appointmentTypes, unavailableBlockTypes] = await Promise.all([
       listResource("/businesses?per_page=100", "businesses"),
-      listResource("/appointment_types?per_page=100", "appointment_types")
+      listResource("/appointment_types?per_page=100", "appointment_types"),
+      listOptionalResource("/unavailable_block_types?per_page=100", "unavailable_block_types")
     ]);
 
     mergeClinikoLocations(db, businesses);
     mergeByExternalId(db.appointmentTypes, appointmentTypes.map(mapClinikoAppointmentType), "clinikoAppointmentTypeId");
+    mergeByExternalId(db.unavailableBlockTypes, unavailableBlockTypes.map(mapClinikoUnavailableBlockType), "clinikoUnavailableBlockTypeId");
 
     const enabledBusinessIds = enabledClinikoBusinessIds(db);
     const practitionerPages = enabledBusinessIds.length
@@ -982,12 +1101,18 @@ export async function syncCliniko(db) {
     const appointmentFilters = enabledBusinessIds.flatMap((businessId) =>
       enabledPractitionerIds.map((practitionerId) => ({ businessId, practitionerId }))
     );
-    const appointmentPages = appointmentFilters.length
-      ? await Promise.all(appointmentFilters.map(({ businessId, practitionerId }) =>
-        listResource(appointmentSyncPath(businessId, practitionerId), "individual_appointments")
-      ))
-      : [];
+    const [appointmentPages, unavailableBlockPages] = appointmentFilters.length
+      ? await Promise.all([
+        Promise.all(appointmentFilters.map(({ businessId, practitionerId }) =>
+          listResource(appointmentSyncPath(businessId, practitionerId), "individual_appointments")
+        )),
+        Promise.all(appointmentFilters.map(({ businessId, practitionerId }) =>
+          listOptionalResource(unavailableBlockSyncPath(businessId, practitionerId), "unavailable_blocks")
+        ))
+      ])
+      : [[], []];
     const appointments = [...new Map(appointmentPages.flat().map((appointment) => [linkedId(appointment), appointment])).values()];
+    const unavailableBlocks = [...new Map(unavailableBlockPages.flat().map((block) => [linkedId(block), block])).values()];
     const patientIds = [...new Set(appointments.map((appointment) => linkedIdFromRecord(appointment, "patient")).filter(Boolean))];
     const patients = patientIds.length
       ? await Promise.all(patientIds.map((patientId) => clinikoFetch(`/patients/${encodeURIComponent(patientId)}`)))
@@ -997,6 +1122,16 @@ export async function syncCliniko(db) {
       .map((appointment) => mapClinikoAppointment(appointment, db))
       .filter(Boolean);
     mergeByExternalId(db.appointments, incomingAppointments, "clinikoId");
+    const incomingUnavailableBlocks = unavailableBlocks
+      .map((block) => mapClinikoUnavailableBlock(block, db))
+      .filter(Boolean);
+    mergeByExternalId(db.unavailableBlocks, incomingUnavailableBlocks, "clinikoUnavailableBlockId");
+    const removedUnavailableBlocksNotReturned = removeMissingClinikoUnavailableBlocks(
+      db,
+      unavailableBlocks.map((block) => linkedId(block)).filter(Boolean),
+      enabledBusinessIds,
+      enabledPractitionerIds
+    );
     const staleAppointmentsNotReturned = markMissingClinikoAppointmentsOutOfScope(
       db,
       appointments.map((appointment) => linkedId(appointment)).filter(Boolean),
@@ -1021,13 +1156,17 @@ export async function syncCliniko(db) {
         practitionersWithWorkingHours: workingHoursSync.withHours,
         practitionersCheckedForWorkingHours: workingHoursSync.updated,
         appointments: incomingAppointments.length,
+        unavailableBlocks: incomingUnavailableBlocks.length,
+        unavailableBlockTypes: unavailableBlockTypes.length,
+        removedUnavailableBlocksNotReturned,
         skippedAppointments,
         staleAppointmentsNotReturned,
         prunedAppointmentsBeforeStart: prunedBeforeStart.appointments,
-        prunedPatientsBeforeStart: prunedBeforeStart.clients
+        prunedPatientsBeforeStart: prunedBeforeStart.clients,
+        prunedUnavailableBlocksBeforeStart: prunedBeforeStart.unavailableBlocks
       },
       message: appointmentFilters.length
-        ? `Read-only sync imported ${patients.length} appointment-linked patients, ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, ${businesses.length} locations, ${workingHoursSync.withHours} Cliniko working-hour schedule${workingHoursSync.withHours === 1 ? "" : "s"}, and ${incomingAppointments.length} appointments from ${enabledBusinessIds.length} enabled Cliniko location${enabledBusinessIds.length === 1 ? "" : "s"} and ${enabledPractitionerIds.length} enabled practitioner${enabledPractitionerIds.length === 1 ? "" : "s"}${config().syncStartDate ? ` from ${config().syncStartDate}` : ""}${skippedAppointments ? ` (${skippedAppointments} skipped because patient or practitioner links were missing)` : ""}${staleAppointmentsNotReturned ? ` (${staleAppointmentsNotReturned} synced appointment${staleAppointmentsNotReturned === 1 ? "" : "s"} no longer returned by Cliniko marked out of scope)` : ""}${prunedBeforeStart.appointments ? ` (${prunedBeforeStart.appointments} older synced appointment${prunedBeforeStart.appointments === 1 ? "" : "s"} removed)` : ""}.`
+        ? `Read-only sync imported ${patients.length} appointment-linked patients, ${practitioners.length} practitioners, ${appointmentTypes.length} appointment types, ${businesses.length} locations, ${workingHoursSync.withHours} Cliniko working-hour schedule${workingHoursSync.withHours === 1 ? "" : "s"}, ${incomingAppointments.length} appointments, and ${incomingUnavailableBlocks.length} unavailable block${incomingUnavailableBlocks.length === 1 ? "" : "s"} from ${enabledBusinessIds.length} enabled Cliniko location${enabledBusinessIds.length === 1 ? "" : "s"} and ${enabledPractitionerIds.length} enabled practitioner${enabledPractitionerIds.length === 1 ? "" : "s"}${config().syncStartDate ? ` from ${config().syncStartDate}` : ""}${skippedAppointments ? ` (${skippedAppointments} skipped because patient or practitioner links were missing)` : ""}${staleAppointmentsNotReturned ? ` (${staleAppointmentsNotReturned} synced appointment${staleAppointmentsNotReturned === 1 ? "" : "s"} no longer returned by Cliniko marked out of scope)` : ""}${removedUnavailableBlocksNotReturned ? ` (${removedUnavailableBlocksNotReturned} unavailable block${removedUnavailableBlocksNotReturned === 1 ? "" : "s"} removed because Cliniko no longer returned them)` : ""}${prunedBeforeStart.appointments ? ` (${prunedBeforeStart.appointments} older synced appointment${prunedBeforeStart.appointments === 1 ? "" : "s"} removed)` : ""}${prunedBeforeStart.unavailableBlocks ? ` (${prunedBeforeStart.unavailableBlocks} older unavailable block${prunedBeforeStart.unavailableBlocks === 1 ? "" : "s"} removed)` : ""}.`
         : enabledBusinessIds.length
         ? `Setup sync imported ${practitioners.length} practitioner${practitioners.length === 1 ? "" : "s"} from the selected Cliniko location, ${workingHoursSync.withHours} Cliniko working-hour schedule${workingHoursSync.withHours === 1 ? "" : "s"}, and ${appointmentTypes.length} appointment types. Choose one Cliniko practitioner, then run Sync Now again before patient appointments are imported.`
         : `Setup sync imported ${appointmentTypes.length} appointment types and ${businesses.length} locations. Choose one Cliniko location, then run Sync Now again to import practitioners for that location.`

@@ -262,7 +262,21 @@ function appointmentDataDigest(data) {
       clinikoUpdatedAt: client.clinikoUpdatedAt || ""
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
-  return JSON.stringify({ appointments, clients });
+  const unavailableBlocks = (data.unavailableBlocks || [])
+    .map((block) => ({
+      id: block.id,
+      contractorId: block.contractorId || "",
+      startsAt: block.startsAt || "",
+      endsAt: block.endsAt || "",
+      startsAtLocal: block.startsAtLocal || "",
+      endsAtLocal: block.endsAtLocal || "",
+      label: block.label || "",
+      kind: block.kind || "",
+      syncStatus: block.syncStatus || "",
+      clinikoUpdatedAt: block.clinikoUpdatedAt || ""
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return JSON.stringify({ appointments, clients, unavailableBlocks });
 }
 
 function renderLogin() {
@@ -1529,22 +1543,24 @@ function renderPractitionerCalendar(appointments) {
 }
 
 function renderUnavailableBlock(block) {
+  const readOnly = unavailableBlockIsReadOnly(block);
+  const label = block.label || blockKindLabel(block.kind);
   return `
     <button
       type="button"
       class="calendar-unavailable-block"
       data-block-kind="${escapeHtml(block.kind || "unavailable")}"
       style="--slot-span: ${unavailableBlockSlotSpan(block)}"
-      draggable="true"
-      data-action="open-unavailable-block"
+      draggable="${readOnly ? "false" : "true"}"
+      data-action="${readOnly ? "synced-unavailable-block" : "open-unavailable-block"}"
       data-calendar-item-type="unavailable"
       data-id="${escapeHtml(block.id)}"
-      title="${escapeHtml(blockKindLabel(block.kind))} ${formatSelectedSlot(block.startsAtLocal)}"
+      title="${escapeHtml(label)} ${formatSelectedSlot(block.startsAtLocal)}"
     >
-      <strong>${escapeHtml(blockKindLabel(block.kind))}</strong>
+      <strong>${escapeHtml(label)}</strong>
       <span>${formatLocalTime(block.startsAtLocal)}-${formatLocalTime(block.endsAtLocal)}</span>
       ${block.note ? `<em>${escapeHtml(block.note)}</em>` : ""}
-      <span class="calendar-resize-handle" data-resize-type="unavailable" data-resize-id="${escapeHtml(block.id)}" aria-hidden="true"></span>
+      ${readOnly ? `<em>Cliniko</em>` : `<span class="calendar-resize-handle" data-resize-type="unavailable" data-resize-id="${escapeHtml(block.id)}" aria-hidden="true"></span>`}
     </button>
   `;
 }
@@ -4605,6 +4621,13 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='synced-unavailable-block']").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.skipClick === "true") return;
+      toast("This unavailable block is synced from Cliniko");
+    });
+  });
+
   document.querySelectorAll("[data-action='calendar-booking']").forEach((button) => {
     button.addEventListener("click", () => {
       state.calendarAppointmentId = "";
@@ -4633,6 +4656,10 @@ function bindViewEvents() {
 
   document.querySelectorAll(".calendar-event, .calendar-unavailable-block").forEach((button) => {
     button.addEventListener("dragstart", (event) => {
+      if (button.getAttribute("draggable") === "false") {
+        event.preventDefault();
+        return;
+      }
       if (!event.dataTransfer) return;
       button.dataset.skipClick = "true";
       button.classList.add("is-dragging");
@@ -7158,12 +7185,25 @@ function slotHasUnavailableConflict(dayKey, slot, durationMinutes, ignoredBlockI
 function unavailableBlocksForDays(days) {
   const dayKeys = new Set(days.map((day) => day.key));
   const practitionerId = currentCalendarPractitionerId();
-  return state.unavailableBlocks
+  return allUnavailableBlocks()
     .filter((block) =>
       block.contractorId === practitionerId
       && dayKeys.has(unavailableBlockDayKey(block))
     )
     .sort((a, b) => a.startsAtLocal.localeCompare(b.startsAtLocal));
+}
+
+function allUnavailableBlocks() {
+  const syncedBlocks = state.data?.unavailableBlocks || [];
+  const syncedIds = new Set(syncedBlocks.map((block) => block.id));
+  return [
+    ...syncedBlocks,
+    ...state.unavailableBlocks.filter((block) => !syncedIds.has(block.id))
+  ];
+}
+
+function unavailableBlockIsReadOnly(block = {}) {
+  return Boolean(block.readOnly || block.syncSource === "cliniko" || block.clinikoUnavailableBlockId);
 }
 
 function unavailableBlockDayKey(block) {

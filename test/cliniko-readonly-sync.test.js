@@ -44,7 +44,9 @@ function blankDb() {
     users: [],
     clients: [],
     appointments: [],
+    unavailableBlocks: [],
     appointmentTypes: [],
+    unavailableBlockTypes: [],
     clinikoLocations: [],
     clinikoSyncLogs: [],
     syncErrors: []
@@ -210,6 +212,20 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
       });
     }
 
+    if (url.pathname === "/v1/unavailable_block_types") {
+      return jsonResponse({
+        unavailable_block_types: [
+          {
+            links: { self: "https://mock.cliniko.test/v1/unavailable_block_types/901" },
+            name: "Unavailable",
+            color: "#d8dde3",
+            updated_at: "2026-05-27T02:10:00Z"
+          }
+        ],
+        links: { next: null }
+      });
+    }
+
     if (url.pathname === "/v1/practitioners/201/daily_availabilities") {
       assert.equal(url.searchParams.getAll("q[]").includes("business_id:=401"), true);
       return jsonResponse({
@@ -266,6 +282,27 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
       });
     }
 
+    if (url.pathname === "/v1/unavailable_blocks") {
+      assert.equal(url.searchParams.getAll("q[]").includes("business_id:=401"), true);
+      assert.equal(url.searchParams.getAll("q[]").includes("practitioner_id:=201"), true);
+      return jsonResponse({
+        unavailable_blocks: [
+          {
+            links: { self: "https://mock.cliniko.test/v1/unavailable_blocks/9901" },
+            practitioner: { links: { self: "https://mock.cliniko.test/v1/practitioners/201" } },
+            business: { links: { self: "https://mock.cliniko.test/v1/businesses/401" } },
+            unavailable_block_type: { links: { self: "https://mock.cliniko.test/v1/unavailable_block_types/901" } },
+            starts_at: "2026-06-03T03:00:00Z",
+            ends_at: "2026-06-03T04:00:00Z",
+            notes: "Case conference",
+            created_at: "2026-05-27T02:15:00Z",
+            updated_at: "2026-05-27T02:20:00Z"
+          }
+        ],
+        links: { next: null }
+      });
+    }
+
     return jsonResponse({ links: { next: null } });
   };
 
@@ -303,6 +340,7 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
     assert.equal(db.clinikoLocations.find((location) => location.enabled).clinikoBusinessId, "401");
     assert.equal(db.users.find((user) => user.clinikoSyncEnabled).clinikoPractitionerId, "201");
     assert.equal(db.appointments.length, 1);
+    assert.equal(db.unavailableBlocks.length, 1);
 
     const appointment = db.appointments[0];
     assert.equal(appointment.clinikoId, "7001");
@@ -316,11 +354,22 @@ test("Cliniko read-only sync imports appointments by practitioner and prevents d
     assert.equal(appointment.clinikoAppointmentNote, "Home visit");
     assert.equal(appointment.syncStatus, "synced");
 
+    const unavailableBlock = db.unavailableBlocks[0];
+    assert.equal(unavailableBlock.clinikoUnavailableBlockId, "9901");
+    assert.equal(unavailableBlock.contractorId, "practitioner-cliniko-201");
+    assert.equal(unavailableBlock.label, "Unavailable");
+    assert.equal(unavailableBlock.note, "Case conference");
+    assert.equal(unavailableBlock.startsAtLocal, "2026-06-03T13:00");
+    assert.equal(unavailableBlock.endsAtLocal, "2026-06-03T14:00");
+    assert.equal(unavailableBlock.readOnly, true);
+    assert.equal(unavailableBlock.syncStatus, "synced");
+
     await syncCliniko(db);
     assert.equal(db.clients.length, 1);
     assert.equal(db.users.length, 1);
     assert.equal(db.appointmentTypes.length, 1);
     assert.equal(db.appointments.length, 1);
+    assert.equal(db.unavailableBlocks.length, 1);
 
     const appointmentCall = calls.find((call) => call.pathname === "/v1/individual_appointments");
     assert.ok(appointmentCall);
