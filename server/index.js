@@ -108,9 +108,11 @@ const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you h
 const SIGNATURE_MAX_DATA_URL_LENGTH = 450000;
 const AI_REPORT_SECTION_MAX_CHARS = 5000;
 const REAL_CLINIKO_RESET_MARKER = "2026-06-01-real-cliniko-reset-v1";
+const FOREGROUND_CLINIKO_SYNC_MIN_MS = 8000;
 
 const appointmentStatuses = ["booked", "confirmed", "completed", "cancelled", "rescheduled", "no-show"];
 const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "paused", "discharged", "declined"];
+let clinikoSyncInFlight = null;
 
 await ensureDb();
 
@@ -468,25 +470,50 @@ function startClinikoPolling() {
   const intervalMs = config.pollingIntervalSeconds
     ? Math.max(config.pollingIntervalSeconds, 15) * 1000
     : Math.max(config.pollingIntervalMinutes || 5, 1) * 60 * 1000;
-  let isPolling = false;
   const pollCliniko = async () => {
-    if (isPolling) return;
-    isPolling = true;
     try {
-      const db = await readDb();
-      const result = await syncCliniko(db);
-      result.db.clinikoSync = result.sync;
-      logActivity(result.db, "system", "polled_cliniko", "cliniko", "sync");
-      await writeDb(result.db);
+      await runClinikoSync({ actorId: "system", action: "polled_cliniko", force: true });
     } catch (error) {
       console.error(error);
-    } finally {
-      isPolling = false;
     }
   };
 
   pollCliniko();
   setInterval(pollCliniko, intervalMs).unref?.();
+}
+
+async function runClinikoSync(options = {}) {
+  if (clinikoSyncInFlight) return clinikoSyncInFlight;
+
+  clinikoSyncInFlight = (async () => {
+    const db = await readDb();
+    const minAgeMs = Number(options.minAgeMs || 0);
+    if (!options.force && minAgeMs && clinikoSyncAgeMs(db) < minAgeMs) {
+      return {
+        db,
+        sync: db.clinikoSync,
+        skipped: true,
+        reason: "recently_synced"
+      };
+    }
+
+    const result = await syncCliniko(db);
+    result.db.clinikoSync = result.sync;
+    logActivity(result.db, options.actorId || "system", options.action || "synced_cliniko", "cliniko", "sync");
+    await writeDb(result.db);
+    return { ...result, skipped: false };
+  })();
+
+  try {
+    return await clinikoSyncInFlight;
+  } finally {
+    clinikoSyncInFlight = null;
+  }
+}
+
+function clinikoSyncAgeMs(db) {
+  const lastSyncMs = new Date(db.clinikoSync?.lastSyncAt || 0).getTime();
+  return Number.isFinite(lastSyncMs) && lastSyncMs > 0 ? Date.now() - lastSyncMs : Infinity;
 }
 
 async function routeApi(req, res, url) {
@@ -1012,15 +1039,27 @@ async function routeApi(req, res, url) {
 
   if (method === "POST" && url.pathname === "/api/cliniko/sync") {
     if (!requireRole(res, auth.user, ["admin"])) return;
-    const result = await syncCliniko(db);
-    result.db.clinikoSync = result.sync;
-    logActivity(result.db, auth.user.id, "synced_cliniko", "cliniko", "sync");
-    await writeDb(result.db);
+    const result = await runClinikoSync({ actorId: auth.user.id, action: "synced_cliniko", force: true });
     sendJson(res, 200, {
       clinikoSync: result.sync,
       config: getClinikoConfig(),
       locations: visibleClinikoLocations(result.db),
       practitioners: clinikoPractitioners(result.db)
+    });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/cliniko/pulse") {
+    const result = await runClinikoSync({
+      actorId: auth.user.id,
+      action: "foreground_cliniko_sync",
+      minAgeMs: FOREGROUND_CLINIKO_SYNC_MIN_MS
+    });
+    sendJson(res, 200, {
+      skipped: Boolean(result.skipped),
+      reason: result.reason || "",
+      clinikoSync: result.sync,
+      config: getClinikoConfig()
     });
     return;
   }

@@ -19,6 +19,8 @@ const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 2200000;
 const state = {
   data: null,
   autoRefreshInFlight: false,
+  foregroundSyncInFlight: false,
+  lastForegroundSyncAt: 0,
   loginLoading: false,
   loginError: "",
   forgotMessage: "",
@@ -149,6 +151,7 @@ registerServiceWorker();
 async function init() {
   await loadData();
   startAutoRefresh();
+  void syncClinikoForeground({ reason: "app_open", quiet: true });
 }
 
 function registerServiceWorker() {
@@ -185,12 +188,55 @@ function startAutoRefresh() {
   }, AUTO_REFRESH_MS);
 
   window.addEventListener("focus", () => {
+    void syncClinikoForeground({ reason: "window_focus" });
     void autoRefreshData({ force: true });
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void autoRefreshData({ force: true });
+    if (!document.hidden) {
+      void syncClinikoForeground({ reason: "visibility_return" });
+      void autoRefreshData({ force: true });
+    }
   });
+}
+
+async function syncClinikoForeground(options = {}) {
+  if (!state.data?.clinikoConfig?.connected || state.foregroundSyncInFlight || document.hidden) return false;
+  const now = Date.now();
+  if (!options.force && now - state.lastForegroundSyncAt < 8000) return false;
+
+  state.foregroundSyncInFlight = true;
+  state.lastForegroundSyncAt = now;
+  const previousDigest = appointmentDataDigest(state.data);
+  try {
+    await fetchJson("/api/cliniko/pulse", {
+      method: "POST",
+      body: { reason: options.reason || "foreground" }
+    });
+    const nextData = await fetchJson("/api/bootstrap");
+    const nextDigest = appointmentDataDigest(nextData);
+    state.data = nextData;
+
+    if (!state.data.reportTemplates.some((template) => template.type === state.reportType)) {
+      state.reportType = state.data.reportTemplates[0]?.type || "Initial Physiotherapy Assessment Report";
+    }
+
+    const tabs = currentTabs();
+    if (!tabs.some(([id]) => id === state.tab) && !hiddenTabs().includes(state.tab)) state.tab = tabs[0][0];
+
+    const changed = previousDigest !== nextDigest;
+    if (changed && AUTO_REFRESH_RENDER_TABS.has(state.tab)) {
+      render();
+      void markApprovalResultsSeenForCurrentTab();
+      if (!options.quiet) toast("Calendar updated from Cliniko");
+    }
+    return changed;
+  } catch (error) {
+    console.error(error);
+    return false;
+  } finally {
+    state.foregroundSyncInFlight = false;
+  }
 }
 
 async function autoRefreshData(options = {}) {
@@ -4495,6 +4541,7 @@ async function submitLogin(event) {
     state.tab = "";
     state.tabHistory = [];
     await loadData();
+    void syncClinikoForeground({ reason: "login", force: true, quiet: true });
   } catch (error) {
     state.loginLoading = false;
     state.loginError = error.message || "Could not sign in.";
