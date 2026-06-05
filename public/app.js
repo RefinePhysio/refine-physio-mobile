@@ -397,9 +397,11 @@ function render() {
       <header class="topbar">
         <div class="topbar-inner">
           <div class="brand-lockup">
-            <div class="brand-text-lockup brand-text-lockup-header" aria-label="Refine Physio Mobile">
-              <span>Refine Physio</span><span>Mobile</span>
-            </div>
+            <button type="button" class="brand-home-button" data-action="brand-home" aria-label="Go to home">
+              <span class="brand-text-lockup brand-text-lockup-header" aria-label="Refine Physio Mobile">
+                <span>Refine Physio</span><span>Mobile</span>
+              </span>
+            </button>
             <span class="brand-userline">${escapeHtml(user.name)} - ${escapeHtml(user.discipline)}</span>
           </div>
           <div class="top-actions ${isOwner ? "has-owner-switch" : ""}">
@@ -4440,6 +4442,12 @@ function renderApprovalCard(request) {
 }
 
 function bindEvents() {
+  document.querySelector("[data-action='brand-home']")?.addEventListener("click", () => {
+    goToBrandHome();
+    render();
+    void markApprovalResultsSeenForCurrentTab();
+  });
+
   document.querySelector("#global-search")?.addEventListener("input", (event) => {
     state.search = event.target.value;
     document.querySelector("#view").innerHTML = renderView();
@@ -4500,6 +4508,28 @@ function bindEvents() {
   });
 
   bindViewEvents();
+}
+
+function goToBrandHome() {
+  const user = state.data?.currentUser || {};
+  const homeTab = user.role === "contractor" || ownerViewingPractitioner()
+    ? "today"
+    : currentTabs()[0]?.[0] || "today";
+  setActiveTab(homeTab);
+  state.search = "";
+  state.tabHistory = [];
+  state.calendarAppointmentId = "";
+  state.calendarAppointmentMode = "details";
+  state.patientFileClientId = "";
+  state.patientFileView = "details";
+  state.adminArchivedAppointmentId = "";
+  state.caseManagerProfileId = "";
+  state.expandedSignedNoteAppointmentId = "";
+  state.expandedReportReviewId = "";
+  closeCalendarBooking();
+  closeUnavailableBlock();
+  closeReportReminder();
+  setCalendarDateKey(dateKeyFromParts(brisbaneParts(new Date())));
 }
 
 function bindLoginEvents() {

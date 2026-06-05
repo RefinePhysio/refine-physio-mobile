@@ -261,6 +261,33 @@ label {
   min-width: 0;
 }
 
+.brand-home-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: flex-start;
+  min-height: 44px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.brand-home-button:hover,
+.brand-home-button:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.brand-home-button:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid rgba(8, 174, 234, 0.32);
+  outline-offset: 4px;
+}
+
 .brand-lockup h1 {
   font-size: 1.02rem;
   line-height: 1.1;
