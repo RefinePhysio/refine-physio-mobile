@@ -1042,6 +1042,11 @@ label {
   min-height: 38px;
 }
 
+.note-copy-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .note-compact-summary {
   display: grid;
   gap: 4px;

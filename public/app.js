@@ -2085,7 +2085,7 @@ function renderNotes() {
 
   const client = data.clients.find((item) => item.id === activeAppointment.clientId) || {};
   const clientAppointments = sortAppointmentsNewest(noteAppointments.filter((appointment) => appointment.clientId === activeAppointment.clientId));
-  const timelineAppointments = clientAppointments;
+  const timelineAppointments = activeNoteTimelineAppointments(clientAppointments, activeAppointment);
   const completedCount = clientAppointments.filter((appointment) => noteForAppointment(appointment.id)?.status === "signed").length;
   const search = state.noteSearch.trim().toLowerCase();
 
@@ -2103,7 +2103,6 @@ function renderNotes() {
       </div>
       <div class="notes-record-layout">
         <section class="notes-record-main">
-          ${renderNotesQuickPanel(noteAppointments, activeAppointment)}
           <div class="notes-filter-row">
             <span>Search</span>
             <input id="note-search" type="search" value="${escapeHtml(state.noteSearch)}" aria-label="Filter treatment notes" placeholder="Filter treatment notes by any word or phrase...">
@@ -2115,6 +2114,14 @@ function renderNotes() {
       </div>
     </section>
   `;
+}
+
+function activeNoteTimelineAppointments(clientAppointments, activeAppointment) {
+  const active = clientAppointments.find((appointment) => appointment.id === activeAppointment.id) || activeAppointment;
+  const appointmentsWithNotes = clientAppointments.filter((appointment) =>
+    appointment.id !== active.id && Boolean(noteForAppointment(appointment.id))
+  );
+  return [active, ...appointmentsWithNotes];
 }
 
 function renderTreatmentNoteTimelineCard(appointment, activeAppointment, index, search) {
@@ -2176,35 +2183,19 @@ function renderTreatmentNoteFormCard(appointment, existingNote, offlineDraft, in
 
 function renderPreviousTreatmentNoteCopyControl(appointment) {
   const previousNotes = previousTreatmentNotesForAppointment(appointment);
-  if (!previousNotes.length) return "";
-  const onlyPrevious = previousNotes.length === 1 ? previousNotes[0] : null;
-
-  if (onlyPrevious) {
-    const noteDate = onlyPrevious.appointment?.startsAt || onlyPrevious.note.updatedAt || onlyPrevious.note.createdAt;
-    return `
-      <section class="note-copy-control is-single full">
-        <input type="hidden" data-previous-note-select value="${escapeHtml(onlyPrevious.note.id)}">
-        <div>
-          <strong>Previous note available</strong>
-          <span>${escapeHtml(formatDateTime(noteDate))} - ${escapeHtml(treatmentNoteTitle(onlyPrevious.appointment || appointment))}</span>
-        </div>
-        <button type="button" class="secondary" data-action="copy-previous-note">Copy last note</button>
-      </section>
-    `;
-  }
+  const previous = previousNotes[0] || null;
+  const noteDate = previous?.appointment?.startsAt || previous?.note?.updatedAt || previous?.note?.createdAt || "";
 
   return `
-    <section class="note-copy-control full">
-      <label>
-        Copy from previous note
-        <select data-previous-note-select>
-          ${previousNotes.map(({ note, appointment: noteAppointment }) => {
-            const noteDate = noteAppointment?.startsAt || note.updatedAt || note.createdAt;
-            return `<option value="${escapeHtml(note.id)}">${escapeHtml(formatDateTime(noteDate))} - ${escapeHtml(treatmentNoteTitle(noteAppointment || appointment))}</option>`;
-          }).join("")}
-        </select>
-      </label>
-      <button type="button" class="secondary" data-action="copy-previous-note">Copy into note</button>
+    <section class="note-copy-control is-single full">
+      <input type="hidden" data-previous-note-select value="${escapeHtml(previous?.note?.id || "")}">
+      <div>
+        <strong>Copy last appointment notes</strong>
+        <span>${previous
+          ? `${escapeHtml(formatDateTime(noteDate))} - ${escapeHtml(treatmentNoteTitle(previous.appointment || appointment))}`
+          : "No previous completed notes for this patient yet."}</span>
+      </div>
+      <button type="button" class="secondary" data-action="copy-previous-note" ${previous ? "" : "disabled"}>Copy last appointment notes</button>
     </section>
   `;
 }
