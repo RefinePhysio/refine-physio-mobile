@@ -15,6 +15,7 @@ const REPORT_PHOTO_LIMIT = 8;
 const REPORT_PHOTO_MAX_EDGE = 1400;
 const REPORT_PHOTO_QUALITY = 0.76;
 const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 2200000;
+let browserNavigationBound = false;
 
 const state = {
   data: null,
@@ -149,6 +150,7 @@ init();
 registerServiceWorker();
 
 async function init() {
+  registerBrowserNavigation();
   await loadData();
   startAutoRefresh();
   void syncClinikoForeground({ reason: "app_open", quiet: true });
@@ -170,6 +172,7 @@ async function loadData() {
     }
     const tabs = currentTabs();
     if (!tabs.some(([id]) => id === state.tab) && !hiddenTabs().includes(state.tab)) state.tab = tabs[0][0];
+    syncBrowserHistory("replace");
     render();
     void markApprovalResultsSeenForCurrentTab();
   } catch (error) {
@@ -613,6 +616,7 @@ function setActiveTab(tabId) {
   state.tabMenuOpen = false;
   if (state.tab !== "messages") state.messageThreadUserId = "";
   localStorage.setItem("refine-active-tab", state.tab);
+  syncBrowserHistory("push");
 }
 
 function rememberTab(tabId) {
@@ -631,11 +635,59 @@ function previousTabId() {
 function goBackToPreviousTab() {
   const previous = previousTabId();
   if (!previous) return;
+  if (window.history.state?.refineApp && window.history.length > 1) {
+    window.history.back();
+    return;
+  }
   state.tabHistory.pop();
   state.tab = previous;
   state.tabMenuOpen = false;
   if (state.tab !== "messages") state.messageThreadUserId = "";
   localStorage.setItem("refine-active-tab", state.tab);
+  syncBrowserHistory("replace");
+}
+
+function registerBrowserNavigation() {
+  if (browserNavigationBound) return;
+  browserNavigationBound = true;
+  window.addEventListener("popstate", (event) => {
+    if (!state.data) return;
+    const tabId = event.state?.refineApp
+      ? event.state.tab
+      : new URLSearchParams(window.location.search).get("tab");
+    if (!tabIsAvailable(tabId)) return;
+    state.tab = tabId;
+    state.tabMenuOpen = false;
+    state.calendarAppointmentId = "";
+    state.calendarAppointmentMode = "details";
+    state.patientFileClientId = "";
+    state.patientFileView = "details";
+    state.adminArchivedAppointmentId = "";
+    state.caseManagerProfileId = "";
+    state.expandedSignedNoteAppointmentId = "";
+    if (state.tab !== "messages") state.messageThreadUserId = "";
+    localStorage.setItem("refine-active-tab", state.tab);
+    closeCalendarBooking();
+    closeUnavailableBlock();
+    closeReportReminder();
+    render();
+    void markApprovalResultsSeenForCurrentTab();
+  });
+}
+
+function syncBrowserHistory(mode = "replace") {
+  if (!state.tab || !tabIsAvailable(state.tab)) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("tab", state.tab);
+  const payload = { refineApp: true, tab: state.tab };
+  if (mode === "push" && window.history.state?.refineApp && window.history.state.tab === state.tab) return;
+  if (mode === "push") window.history.pushState(payload, "", url);
+  else window.history.replaceState(payload, "", url);
+}
+
+function tabIsAvailable(tabId) {
+  if (!tabId) return false;
+  return currentTabs().some(([id]) => id === tabId) || hiddenTabs().includes(tabId);
 }
 
 function tabLabel(tabId) {
