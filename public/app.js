@@ -2162,10 +2162,6 @@ function renderTreatmentNoteFormCard(appointment, existingNote, offlineDraft, in
       <input type="hidden" name="contractorId" value="${appointment.contractorId}">
       <input type="hidden" name="discipline" value="${escapeHtml(discipline)}">
       ${renderTreatmentNoteHeader(appointment, existingNote, index, offlineDraft ? "Offline draft" : "Draft")}
-      <div class="mobile-form-actions form-actions">
-        <button type="submit" name="mode" value="draft" class="secondary">Save draft</button>
-        <button type="submit" name="mode" value="signed">Sign note</button>
-      </div>
       <div class="treatment-note-body form-grid">
         ${offlineDraft ? `<div class="note-inline-alert full">Offline draft saved on this device</div>` : ""}
         ${renderPreviousTreatmentNoteCopyControl(appointment)}
