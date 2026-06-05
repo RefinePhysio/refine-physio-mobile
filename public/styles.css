@@ -1751,6 +1751,19 @@ label {
   font-size: 0.82rem;
 }
 
+.phone-link {
+  color: var(--brand-dark);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.phone-link:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid rgba(8, 174, 234, 0.32);
+  outline-offset: 2px;
+}
+
 .detail-list .cliniko-appointment-note,
 .appointment-modal-list .cliniko-appointment-note {
   background: rgba(37, 184, 204, 0.1);

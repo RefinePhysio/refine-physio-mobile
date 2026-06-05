@@ -1249,7 +1249,7 @@ function renderArchivedAppointmentDetailModal() {
             <div><strong>Archived by</strong>${escapeHtml(archivedBy)}</div>
             <div><strong>Archived on</strong>${appointment.archivedAt ? formatDateTime(appointment.archivedAt) : "Not recorded"}</div>
             <div><strong>Booked by</strong>${escapeHtml(createdBy)}</div>
-            <div><strong>Phone</strong>${escapeHtml(appointmentContactNumber(appointment) || client.phone || "No mobile recorded")}</div>
+            <div><strong>Phone</strong>${phoneLink(appointmentContactNumber(appointment), "No mobile recorded")}</div>
             <div><strong>Address</strong>${escapeHtml(appointment.address || client.address || "No address recorded")}</div>
           </div>
           ${canDeleteHistory ? `
@@ -2886,7 +2886,7 @@ function renderNotesDueCard(appointment) {
       <div class="detail-list">
         <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
         <div><strong>Appointment type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType)}</div>
-        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        <div><strong>Contact</strong>${phoneLink(appointmentContactNumber(appointment), "No mobile recorded")}</div>
         ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
         ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
       </div>
@@ -2963,7 +2963,7 @@ function renderReportsDueCard(appointment) {
       </div>
       <div class="detail-list">
         <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
-        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        <div><strong>Contact</strong>${phoneLink(appointmentContactNumber(appointment), "No mobile recorded")}</div>
         ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
         ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
       </div>
@@ -3294,7 +3294,7 @@ function renderAppointmentCard(appointment) {
       <div class="detail-list">
         <div><strong>Time</strong>${formatDateTime(appointment.startsAt)} - ${formatTime(appointment.endsAt)}</div>
         <div><strong>Address</strong>${escapeHtml(appointmentAddress)}</div>
-        <div><strong>Contact</strong>${escapeHtml(appointmentContactNumber(appointment))}</div>
+        <div><strong>Contact</strong>${phoneLink(appointmentContactNumber(appointment), "No mobile recorded")}</div>
         <div><strong>Appointment type</strong>${escapeHtml(appointment.appointmentType || appointment.recurrence || appointment.serviceType)}</div>
         ${appointmentReasonDetailHtml(appointment, "Reason for referral")}
         ${clinikoAppointmentNoteDetailHtml(appointment, { compact: true })}
@@ -3685,7 +3685,7 @@ function renderAppointmentDetailModal() {
             </div>
             ${renderAppointmentCompletionPills(appointment)}
             <div class="appointment-modal-contact">
-              <span>${escapeHtml(appointmentContactNumber(appointment) || "No mobile recorded")}</span>
+              <span>${phoneLink(appointmentContactNumber(appointment), "No mobile recorded")}</span>
               ${appointmentEmail ? `<span>${escapeHtml(appointmentEmail)}</span>` : ""}
             </div>
 
@@ -8000,6 +8000,22 @@ function chosenEquipmentModels(fields = {}) {
 
 function appointmentContactNumber(appointment) {
   return appointment.contactNumber || state.data.clients.find((client) => client.id === appointment.clientId)?.phone || "";
+}
+
+function phoneLink(value, fallback = "No mobile recorded") {
+  const display = String(value || "").trim();
+  const href = phoneHref(display);
+  if (!href) return escapeHtml(fallback);
+  return `<a class="phone-link" href="${escapeHtml(href)}" aria-label="Call ${escapeHtml(display)}">${escapeHtml(display)}</a>`;
+}
+
+function phoneHref(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const hasInternationalPrefix = text.startsWith("+");
+  const digits = text.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  return `tel:${hasInternationalPrefix ? "+" : ""}${digits}`;
 }
 
 function appointmentClinikoNote(appointment) {

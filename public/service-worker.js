@@ -1,9 +1,9 @@
-const CACHE_NAME = "refine-physio-shell-v44";
+const CACHE_NAME = "refine-physio-shell-v45";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260603-1",
-  "/app.js?v=20260603-1",
+  "/styles.css?v=20260605-2",
+  "/app.js?v=20260605-2",
   "/manifest.webmanifest",
   "/icon.svg?v=20260605-1",
   "/icon-192.png?v=20260605-1",
