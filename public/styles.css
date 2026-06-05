@@ -337,7 +337,7 @@ label {
   display: flex;
   flex-wrap: wrap;
   font-weight: 900;
-  gap: 0 0.3em;
+  gap: 0;
   letter-spacing: 0;
   line-height: 1.08;
   min-width: 0;
@@ -356,6 +356,7 @@ label {
 .brand-text-lockup span:last-child,
 .brand-lockup .brand-text-lockup span:last-child {
   color: #08aeea;
+  margin-left: 0.34em;
 }
 
 .brand-text-lockup-header {
