@@ -2096,7 +2096,7 @@ function renderNotes() {
       <div class="notes-record-header">
         <div>
           <h2>Treatment notes</h2>
-          <p>${escapeHtml(client.name || clientName(activeAppointment.clientId))}</p>
+          <p>${patientNameButton(activeAppointment.clientId, client.name || clientName(activeAppointment.clientId))}</p>
         </div>
         <div class="notes-record-summary">
           ${statusPill(`${completedCount} completed`, "blue")}
@@ -2269,7 +2269,7 @@ function renderTreatmentNoteHeader(appointment, note, index, status) {
       <div>
         <h3>${formatDateTime(appointment.startsAt)}</h3>
         <div class="treatment-note-meta">
-          <span>${escapeHtml(clientName(appointment.clientId))}</span>
+          <span>${patientNameButton(appointment.clientId, clientName(appointment.clientId))}</span>
           <span>${escapeHtml(userName(appointment.contractorId))}</span>
           <span>${escapeHtml(typeInfo?.label || appointment.appointmentType || appointment.recurrence || appointment.serviceType || "Appointment")}</span>
         </div>
