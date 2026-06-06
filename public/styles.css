@@ -4443,7 +4443,8 @@ label {
   background: #e4eef5;
 }
 
-.mini-month-title strong {
+.mini-month-title .mini-month-label {
+  font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9064,7 +9065,7 @@ h3,
     box-shadow: 0 12px 24px rgba(19, 52, 72, 0.12);
     display: block;
     margin-top: 8px;
-    padding: 12px;
+    padding: 14px;
   }
 
   .mobile-calendar-picker .mini-month {
@@ -9075,28 +9076,30 @@ h3,
   .mobile-calendar-picker .mini-month-title {
     align-items: center;
     gap: 8px;
-    grid-template-columns: 42px minmax(12rem, 1fr) 42px;
-    margin-bottom: 10px;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    margin-bottom: 12px;
     width: 100%;
   }
 
   .mobile-calendar-picker .mini-month-title button {
+    background: #eef8fb;
+    border-color: #b9dae8;
     border-radius: 10px;
     color: #0c4259;
     display: grid;
-    font-size: 1.35rem;
-    height: 40px;
+    font-size: 1.45rem;
+    height: 42px;
     justify-self: center;
-    min-height: 40px;
-    min-width: 40px;
+    min-height: 42px;
+    min-width: 42px;
     place-items: center;
-    width: 40px;
+    width: 42px;
   }
 
-  .mobile-calendar-picker .mini-month-title strong {
+  .mobile-calendar-picker .mini-month-title .mini-month-label {
     color: #0c4259;
     display: block;
-    font-size: 1.08rem;
+    font-size: 1.18rem;
     font-weight: 900;
     line-height: 1.2;
     min-width: 0;
@@ -9114,8 +9117,8 @@ h3,
   .mobile-calendar-picker .mini-days button,
   .mobile-calendar-picker .mini-days span {
     font-size: 0.92rem;
-    height: 38px;
-    min-height: 38px;
+    height: 40px;
+    min-height: 40px;
   }
 
   .mobile-calendar-picker-actions {

@@ -3232,11 +3232,11 @@ function renderMiniMonth(offset, options = {}) {
     <div class="mini-month">
       <div class="mini-month-title">
         ${offset === 0 || options.showBothControls
-          ? `<button type="button" data-action="calendar-month-shift" data-direction="-1" aria-label="Previous month">‹</button>`
+          ? `<button type="button" data-action="calendar-month-shift" data-direction="-1" aria-label="Previous month">&lsaquo;</button>`
           : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
-        <strong>${new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(monthDate)}</strong>
+        <span class="mini-month-label">${new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(monthDate)}</span>
         ${offset === 1 || options.showBothControls
-          ? `<button type="button" data-action="calendar-month-shift" data-direction="1" aria-label="Next month">›</button>`
+          ? `<button type="button" data-action="calendar-month-shift" data-direction="1" aria-label="Next month">&rsaquo;</button>`
           : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
       </div>
       <div class="mini-weekdays">${["M", "T", "W", "T", "F", "S", "S"].map((label) => `<span>${label}</span>`).join("")}</div>
