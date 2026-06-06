@@ -403,7 +403,14 @@ label {
 }
 
 .brand-text-lockup-login {
+  align-items: start;
+  display: inline-grid;
   font-size: clamp(2rem, 6vw, 3rem);
+  line-height: 0.98;
+}
+
+.brand-text-lockup-login span:last-child {
+  margin-left: 0;
 }
 
 .brand-text-lockup-loading {
