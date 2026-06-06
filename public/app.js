@@ -1552,6 +1552,19 @@ function nextOnboardingSectionId() {
   return onboardingSections[(index + 1) % onboardingSections.length]?.id || onboardingSections[0]?.id || "";
 }
 
+function scrollOnboardingContentToTop() {
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector(".onboarding-content") || document.querySelector(".onboarding-hero");
+    const offset = window.matchMedia("(max-width: 760px)").matches ? 8 : 16;
+    const top = target ? target.getBoundingClientRect().top + window.scrollY - offset : 0;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({
+      top: Math.max(0, top),
+      behavior: reducedMotion ? "auto" : "smooth"
+    });
+  });
+}
+
 function scrollTabList(step = 1) {
   const tabs = document.querySelector("#section-tabs");
   if (!tabs) return;
@@ -5828,12 +5841,14 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       setOnboardingSection(button.dataset.sectionId || "");
       render();
+      scrollOnboardingContentToTop();
     });
   });
 
   document.querySelector("[data-action='onboarding-mobile-section']")?.addEventListener("change", (event) => {
     setOnboardingSection(event.currentTarget.value || "");
     render();
+    scrollOnboardingContentToTop();
   });
 
   document.querySelector("[data-action='onboarding-complete']")?.addEventListener("click", (event) => {
@@ -5848,6 +5863,7 @@ function bindViewEvents() {
   document.querySelector("[data-action='onboarding-next']")?.addEventListener("click", () => {
     setOnboardingSection(nextOnboardingSectionId());
     render();
+    scrollOnboardingContentToTop();
   });
 
   document.querySelector("#user-create-form")?.addEventListener("submit", submitCreateUser);
