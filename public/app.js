@@ -1117,7 +1117,7 @@ function renderLogin() {
         </div>
         <div class="login-copy">
           <h2>${state.forgotMode ? "Reset Refine app access" : "Sign in to Refine"}</h2>
-          <p>${state.forgotMode ? "This resets your Refine app password only." : "Use your Refine Physio Mobile account. This does not sign you into Cliniko."}</p>
+          <p>${state.forgotMode ? "This resets your Refine app password only." : "Use your Refine Physio Mobile account to open your schedule, handbook and assigned tools."}</p>
         </div>
         ${state.loginError ? `<div class="form-error" role="alert">${escapeHtml(state.loginError)}</div>` : ""}
         ${state.forgotMessage ? `<div class="form-success" role="status">${escapeHtml(state.forgotMessage)}</div>` : ""}
@@ -1150,7 +1150,7 @@ function renderLoginForm() {
       <button type="submit" ${state.loginLoading ? "disabled" : ""}>
         ${state.loginLoading ? "Signing in..." : "Sign in"}
       </button>
-      <p class="login-security-note">Cliniko access stays separate. Practitioners can only use the app areas they are assigned to.</p>
+      <p class="login-security-note">Access is based on your role. Practitioners only see the areas and clients assigned to them.</p>
       <button type="button" class="ghost" data-action="forgot-password">Forgot password?</button>
     </form>
   `;
