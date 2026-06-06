@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Refine Device Preview</title>
+    <style>
+      :root {
+        --bg: #eef5f8;
+        --ink: #102336;
+        --muted: #5d7282;
+        --brand: #087ea4;
+        --line: #cfe1eb;
+        --surface: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+      }
+
+      .preview-shell {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 100vh;
+      }
+
+      .preview-toolbar {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.94);
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 12px 30px rgba(20, 36, 51, 0.08);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 12px;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+
+      .preview-title {
+        display: grid;
+        gap: 2px;
+        margin-right: auto;
+        min-width: 220px;
+      }
+
+      .preview-title strong {
+        font-size: 1rem;
+      }
+
+      .preview-title span {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      label {
+        color: var(--muted);
+        display: grid;
+        font-size: 0.72rem;
+        font-weight: 800;
+        gap: 4px;
+        text-transform: uppercase;
+      }
+
+      select,
+      button,
+      a.button {
+        align-items: center;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
+        display: inline-flex;
+        font: inherit;
+        font-weight: 800;
+        justify-content: center;
+        min-height: 40px;
+        padding: 9px 12px;
+        text-decoration: none;
+      }
+
+      select {
+        min-width: 210px;
+      }
+
+      button,
+      a.button {
+        cursor: pointer;
+      }
+
+      button.primary,
+      a.button.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: #fff;
+      }
+
+      .preview-stage {
+        display: grid;
+        min-height: 0;
+        overflow: auto;
+        padding: 22px;
+        place-items: start center;
+      }
+
+      .device-wrap {
+        transform-origin: top center;
+      }
+
+      .device-frame {
+        background: #101828;
+        border: 10px solid #101828;
+        border-radius: 30px;
+        box-shadow: 0 24px 70px rgba(20, 36, 51, 0.22);
+        overflow: hidden;
+      }
+
+      .device-frame.desktop {
+        border-radius: 14px;
+        border-width: 8px;
+      }
+
+      iframe {
+        background: #fff;
+        border: 0;
+        display: block;
+        height: var(--device-height);
+        width: var(--device-width);
+      }
+
+      .device-meta {
+        color: var(--muted);
+        font-size: 0.82rem;
+        font-weight: 750;
+        margin-top: 10px;
+        text-align: center;
+      }
+
+      @media (max-width: 720px) {
+        .preview-toolbar {
+          align-items: stretch;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .preview-title,
+        label,
+        a.button.primary {
+          grid-column: 1 / -1;
+        }
+
+        select,
+        button,
+        a.button {
+          width: 100%;
+        }
+
+        .preview-stage {
+          padding: 14px 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-shell">
+      <header class="preview-toolbar">
+        <div class="preview-title">
+          <strong>Refine responsive preview</strong>
+          <span>Switch device size and click around live.</span>
+        </div>
+
+        <label>
+          Device
+          <select id="device-select">
+            <option value="iphone">iPhone</option>
+            <option value="iphone-max" selected>iPhone Max</option>
+            <option value="ipad">iPad</option>
+            <option value="laptop">Laptop</option>
+            <option value="4k">4K desktop</option>
+          </select>
+        </label>
+
+        <button type="button" id="rotate-button">Rotate</button>
+        <button type="button" id="reload-button">Reload</button>
+        <a class="button primary" id="open-button" href="/" target="_blank" rel="noreferrer">Open full page</a>
+      </header>
+
+      <section class="preview-stage" id="preview-stage">
+        <div class="device-wrap" id="device-wrap">
+          <div class="device-frame" id="device-frame">
+            <iframe id="preview-frame" title="Responsive app preview"></iframe>
+          </div>
+          <div class="device-meta" id="device-meta"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const devices = {
+        iphone: { label: "iPhone", width: 390, height: 844, mobile: true },
+        "iphone-max": { label: "iPhone Max", width: 430, height: 932, mobile: true },
+        ipad: { label: "iPad", width: 820, height: 1180, mobile: true },
+        laptop: { label: "Laptop", width: 1440, height: 900, mobile: false },
+        "4k": { label: "4K desktop", width: 3840, height: 2160, mobile: false }
+      };
+
+      const params = new URLSearchParams(window.location.search);
+      const target = params.get("target") || "/?tab=handbook&final=1";
+      const select = document.querySelector("#device-select");
+      const frame = document.querySelector("#preview-frame");
+      const wrap = document.querySelector("#device-wrap");
+      const deviceFrame = document.querySelector("#device-frame");
+      const stage = document.querySelector("#preview-stage");
+      const meta = document.querySelector("#device-meta");
+      const openButton = document.querySelector("#open-button");
+      let rotated = false;
+
+      function targetUrl() {
+        return new URL(target, window.location.origin).toString();
+      }
+
+      function applyDevice() {
+        const base = devices[select.value] || devices["iphone-max"];
+        const width = rotated ? base.height : base.width;
+        const height = rotated ? base.width : base.height;
+        document.documentElement.style.setProperty("--device-width", `${width}px`);
+        document.documentElement.style.setProperty("--device-height", `${height}px`);
+        deviceFrame.classList.toggle("desktop", !base.mobile);
+        meta.textContent = `${base.label}${rotated ? " landscape" : ""} - ${width} x ${height}`;
+        openButton.href = targetUrl();
+        scaleDevice(width, height);
+      }
+
+      function scaleDevice(width, height) {
+        const availableWidth = Math.max(320, stage.clientWidth - 24);
+        const availableHeight = Math.max(420, window.innerHeight - 130);
+        const scale = Math.min(1, availableWidth / (width + 20), availableHeight / (height + 20));
+        wrap.style.transform = `scale(${scale})`;
+        wrap.style.marginBottom = `${Math.max(0, (height + 70) * scale - height)}px`;
+      }
+
+      select.addEventListener("change", applyDevice);
+      document.querySelector("#rotate-button").addEventListener("click", () => {
+        rotated = !rotated;
+        applyDevice();
+      });
+      document.querySelector("#reload-button").addEventListener("click", () => {
+        frame.src = targetUrl();
+      });
+      window.addEventListener("resize", applyDevice);
+
+      frame.src = targetUrl();
+      applyDevice();
+    </script>
+  </body>
+</html>

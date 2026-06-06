@@ -2,6 +2,7 @@ const CACHE_NAME = "refine-physio-shell-v68";
 const APP_SHELL = [
   "/",
   "/index.html",
+  "/device-preview.html",
   "/styles.css?v=20260606-handbook-16",
   "/app.js?v=20260606-handbook-16",
   "/manifest.webmanifest",
