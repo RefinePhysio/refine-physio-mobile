@@ -2987,6 +2987,7 @@ async function serveStatic(req, res, url) {
     res.writeHead(200, {
       ...securityHeaders(),
       "Content-Type": contentType(filePath),
+      ...(path.extname(filePath).toLowerCase() === ".pdf" ? { "Content-Disposition": "inline" } : {}),
       "Cache-Control": path.basename(filePath) === "service-worker.js" ? "no-store" : "no-cache"
     });
     res.end(contents);
@@ -4244,6 +4245,7 @@ function contentType(filePath) {
     ".js": "text/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".webmanifest": "application/manifest+json; charset=utf-8",
+    ".pdf": "application/pdf",
     ".svg": "image/svg+xml",
     ".png": "image/png"
   }[ext] || "application/octet-stream";
