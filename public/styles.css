@@ -3746,14 +3746,14 @@ label {
 }
 
 .rebook-booking-popover {
-  left: 50%;
+  filter: drop-shadow(0 18px 34px rgba(15, 43, 60, 0.20));
   max-height: calc(100% - 24px);
   overflow: auto;
   position: absolute;
-  right: auto;
-  top: 12px;
-  transform: translateX(-50%);
-  width: min(520px, calc(100% - 24px));
+  right: 16px;
+  top: 84px;
+  transform: none;
+  width: min(520px, calc(100% - 32px));
   z-index: 12;
 }
 

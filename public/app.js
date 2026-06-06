@@ -2864,24 +2864,16 @@ function renderRebook() {
   }
 
   if (selectedRebookClient) {
-    if (state.rebookSelectedStartLocal) {
-      return `
-        <section class="section rebook-focus-section">
-          <div class="rebook-confirm-stage">
-            ${renderRebookInstructionCard(selectedRebookClient)}
-            <div class="rebook-booking-inline" role="dialog" aria-label="Create rebooking">
-              ${renderRebookAppointmentForm(data, selectedRebookClient)}
-            </div>
-          </div>
-        </section>
-      `;
-    }
-
     return `
       <section class="section rebook-focus-section">
-        <div class="rebook-calendar-stage">
+        <div class="rebook-calendar-stage ${state.rebookSelectedStartLocal ? "has-selected-slot" : ""}">
           ${renderRebookInstructionCard(selectedRebookClient)}
           ${renderRebookSlotCalendar(selectedRebookClient)}
+          ${state.rebookSelectedStartLocal ? `
+            <div class="rebook-booking-popover" role="dialog" aria-label="Create another appointment">
+              ${renderRebookAppointmentForm(data, selectedRebookClient)}
+            </div>
+          ` : ""}
         </div>
       </section>
     `;
@@ -2899,7 +2891,7 @@ function renderRebook() {
               <div><strong>Funding</strong>${escapeHtml(client.fundingType || "Not recorded")}</div>
             </div>
             <div class="actions">
-              <button data-action="rebook-client" data-client-id="${client.id}">Rebook</button>
+              <button data-action="rebook-client" data-client-id="${client.id}">Book another</button>
               <button class="secondary" data-action="rebook-status" data-client-id="${client.id}">Status</button>
             </div>
           </article>
@@ -2919,7 +2911,7 @@ function renderRebookInstructionCard(client) {
   return `
     <div class="rebook-instruction-card">
       <div>
-        <strong>Rebook ${escapeHtml(client.name)}</strong>
+        <strong>Book another for ${escapeHtml(client.name)}</strong>
         <span>${selectedLabel ? `Selected ${escapeHtml(selectedLabel)}. Check details, then create the appointment.` : "Tap a blank time on the calendar. The new appointment will default to 1 hour."}</span>
       </div>
       ${rebookClients.length > 1 ? `
@@ -4499,7 +4491,7 @@ function renderAppointmentCard(appointment) {
         ${showTreatmentNote ? `<button class="secondary" data-action="open-note" data-id="${appointment.id}">Note</button>` : ""}
         ${showReport ? `<button class="secondary" data-action="open-appointment-report" data-id="${appointment.id}">Report</button>` : ""}
         ${canRequestApproval ? `<button class="secondary" data-action="approval-needed" data-id="${appointment.id}" data-client-id="${appointment.clientId}">Approvals needed</button>` : ""}
-        ${canRebook ? `<button data-action="rebook-appointment" data-id="${appointment.id}" data-client-id="${appointment.clientId}">Rebook</button>` : ""}
+        ${canRebook ? `<button data-action="rebook-appointment" data-id="${appointment.id}" data-client-id="${appointment.clientId}">Book another</button>` : ""}
         <button class="secondary archive-button" data-action="appointment-archive" data-id="${appointment.id}">Archive</button>
       </div>
       <div class="mini-actions">
@@ -4936,7 +4928,7 @@ function renderAppointmentDetailModal() {
               <summary>More options</summary>
               <div>
                 ${readOnly ? "" : `<button type="button" class="secondary" data-action="appointment-reschedule" data-id="${escapeHtml(appointment.id)}">Edit appointment</button>`}
-                <button type="button" class="secondary" data-action="rebook-appointment" data-id="${escapeHtml(appointment.id)}" data-client-id="${escapeHtml(appointment.clientId)}">Rebook</button>
+                <button type="button" class="secondary" data-action="rebook-appointment" data-id="${escapeHtml(appointment.id)}" data-client-id="${escapeHtml(appointment.clientId)}">Book another</button>
                 <button type="button" class="secondary archive-button" data-action="appointment-archive" data-id="${escapeHtml(appointment.id)}">Archive</button>
               </div>
             </details>
@@ -5449,7 +5441,7 @@ function renderClientCard(client) {
         <div class="actions">
           <button type="button" class="secondary" data-action="open-patient-file" data-client-id="${escapeHtml(client.id)}">Patient details</button>
           <button class="secondary" data-action="approval-needed" data-client-id="${client.id}">Approvals needed</button>
-          <button data-action="rebook-client" data-client-id="${client.id}">Rebook</button>
+          <button data-action="rebook-client" data-client-id="${client.id}">Book another</button>
         </div>
       ` : ""}
     </article>
@@ -6885,7 +6877,7 @@ async function submitRebook(event) {
   state.calendarAppointmentMode = "details";
   closeCalendarBooking();
   closeUnavailableBlock();
-  toast(bookingSyncMessage(appointment, "Patient rebooked"));
+  toast(bookingSyncMessage(appointment, "Another appointment booked"));
   await loadData();
 }
 
