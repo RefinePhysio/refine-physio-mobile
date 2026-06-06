@@ -55,6 +55,7 @@ const state = {
   calendarMode: localStorage.getItem("refine-calendar-mode") || "day",
   calendarDateKey: localStorage.getItem("refine-calendar-date") || "",
   calendarMonthOffset: Number(localStorage.getItem("refine-calendar-month-offset") || 0),
+  calendarMonthPickerOpen: false,
   ownerView: localStorage.getItem("refine-owner-view") || "admin",
   ownerPractitionerId: localStorage.getItem("refine-owner-practitioner") || "",
   noteOutcomeMeasures: {},
@@ -3133,10 +3134,11 @@ function renderSchedulerToolbar(title, buttonType = false) {
       <div class="calendar-date-nav" aria-label="Calendar date">
         <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="-1" aria-label="Previous ${mode === "week" ? "week" : "day"}">&lt;</button>
         <input type="date" value="${escapeHtml(selectedDate)}" data-action="calendar-date-input" aria-label="Choose calendar date">
-        <span class="calendar-range-label" aria-hidden="true">${escapeHtml(rangeLabel)}</span>
+        <button type="button" class="calendar-range-label" data-action="calendar-picker-toggle" aria-expanded="${state.calendarMonthPickerOpen ? "true" : "false"}" aria-controls="mobile-calendar-picker">${escapeHtml(rangeLabel)}</button>
         <button${typeAttr} class="secondary" data-action="calendar-shift" data-direction="1" aria-label="Next ${mode === "week" ? "week" : "day"}">&gt;</button>
         <button${typeAttr} class="today-jump" data-action="calendar-today" aria-label="Jump to today's date">Today</button>
       </div>
+      ${state.calendarMonthPickerOpen ? renderMobileCalendarMonthPicker() : ""}
       <div class="calendar-toggle" aria-label="Calendar view">
         <button${typeAttr} class="${mode === "day" ? "active" : ""}" data-action="calendar-mode" data-mode="day">Daily</button>
         <button${typeAttr} class="${mode === "week" ? "active" : ""}" data-action="calendar-mode" data-mode="week">Weekly</button>
@@ -3218,7 +3220,7 @@ function renderCalendarHeader(days) {
   `;
 }
 
-function renderMiniMonth(offset) {
+function renderMiniMonth(offset, options = {}) {
   const today = brisbaneParts(new Date());
   const selectedParts = datePartsFromKey(selectedCalendarDateKey());
   const monthDate = new Date(Date.UTC(selectedParts.year, selectedParts.month - 1 + state.calendarMonthOffset + offset, 1));
@@ -3237,11 +3239,11 @@ function renderMiniMonth(offset) {
   return `
     <div class="mini-month">
       <div class="mini-month-title">
-        ${offset === 0
+        ${offset === 0 || options.showBothControls
           ? `<button type="button" data-action="calendar-month-shift" data-direction="-1" aria-label="Previous month">‹</button>`
           : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
         <strong>${new Intl.DateTimeFormat("en-AU", { month: "long", year: "numeric", timeZone: "UTC" }).format(monthDate)}</strong>
-        ${offset === 1
+        ${offset === 1 || options.showBothControls
           ? `<button type="button" data-action="calendar-month-shift" data-direction="1" aria-label="Next month">›</button>`
           : `<span class="mini-month-spacer" aria-hidden="true"></span>`}
       </div>
@@ -3256,6 +3258,17 @@ function renderMiniMonth(offset) {
           ].filter(Boolean).join(" ");
           return `<button type="button" class="${className}" data-action="calendar-date" data-date="${escapeHtml(key)}" aria-pressed="${selectedKeys.has(key) ? "true" : "false"}">${escapeHtml(day)}</button>`;
         }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderMobileCalendarMonthPicker() {
+  return `
+    <div class="mobile-calendar-picker" id="mobile-calendar-picker" aria-label="Choose a calendar date">
+      ${renderMiniMonth(0, { showBothControls: true })}
+      <div class="mobile-calendar-picker-actions">
+        <button type="button" class="secondary" data-action="calendar-picker-close">Close</button>
       </div>
     </div>
   `;
@@ -6209,9 +6222,20 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelector("[data-action='calendar-picker-toggle']")?.addEventListener("click", () => {
+    state.calendarMonthPickerOpen = !state.calendarMonthPickerOpen;
+    render();
+  });
+
+  document.querySelector("[data-action='calendar-picker-close']")?.addEventListener("click", () => {
+    state.calendarMonthPickerOpen = false;
+    render();
+  });
+
   document.querySelectorAll("[data-action='calendar-date']").forEach((button) => {
     button.addEventListener("click", () => {
       setCalendarDateKey(button.dataset.date);
+      state.calendarMonthPickerOpen = false;
       render();
     });
   });
@@ -6227,12 +6251,14 @@ function bindViewEvents() {
 
   document.querySelector("[data-action='calendar-date-input']")?.addEventListener("change", (event) => {
     setCalendarDateKey(event.target.value);
+    state.calendarMonthPickerOpen = false;
     render();
   });
 
   document.querySelector("[data-action='calendar-today']")?.addEventListener("click", () => {
     setCalendarDateKey(dateKeyFromParts(brisbaneParts(new Date())));
     state.calendarMonthOffset = 0;
+    state.calendarMonthPickerOpen = false;
     localStorage.setItem("refine-calendar-month-offset", "0");
     render();
   });

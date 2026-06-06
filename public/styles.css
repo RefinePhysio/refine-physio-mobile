@@ -4482,6 +4482,10 @@ label {
   font-weight: 800;
 }
 
+.mobile-calendar-picker {
+  display: none;
+}
+
 .scheduler-panel {
   border-top: 1px solid #cfcfcf;
   display: grid;
@@ -9014,6 +9018,68 @@ h3,
 
   .calendar-date-nav button:nth-of-type(2) {
     border-radius: 0 8px 8px 0;
+  }
+
+  .calendar-date-nav button.calendar-range-label {
+    background: #fff;
+    border-color: #c1d1dc;
+    border-inline-width: 0;
+    border-radius: 0;
+    color: #263d4f;
+    font-size: 0.98rem;
+    font-weight: 850;
+    line-height: 1.15;
+    text-align: center;
+  }
+
+  .calendar-date-nav button[data-action="calendar-shift"][data-direction="1"] {
+    border-radius: 0 8px 8px 0;
+  }
+
+  .mobile-calendar-picker {
+    background: #ffffff;
+    border: 1px solid #cfe0e9;
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(19, 52, 72, 0.12);
+    display: block;
+    margin-top: 8px;
+    padding: 12px;
+  }
+
+  .mobile-calendar-picker .mini-month {
+    margin-inline: auto;
+    max-width: 360px;
+  }
+
+  .mobile-calendar-picker .mini-month-title {
+    margin-bottom: 10px;
+  }
+
+  .mobile-calendar-picker .mini-month-title button {
+    height: 34px;
+    min-height: 34px;
+  }
+
+  .mobile-calendar-picker .mini-weekdays span {
+    height: 28px;
+    min-height: 28px;
+  }
+
+  .mobile-calendar-picker .mini-days button,
+  .mobile-calendar-picker .mini-days span {
+    font-size: 0.92rem;
+    height: 38px;
+    min-height: 38px;
+  }
+
+  .mobile-calendar-picker-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+  }
+
+  .mobile-calendar-picker-actions button {
+    min-height: 38px;
   }
 
   .scheduler-body,
