@@ -1920,7 +1920,13 @@ function isClinikoAppointmentWriteBackEdit(body, appointment) {
   if (!appointment.clinikoId) return false;
   return ["startsAt", "endsAt", "appointmentType", "recurrence"].some((key) =>
     Object.hasOwn(body, key) && body[key] !== appointment[key]
-  );
+  ) || isClinikoAttendanceWriteBack(body, appointment);
+}
+
+function isClinikoAttendanceWriteBack(body, appointment) {
+  if (!Object.hasOwn(body, "status") || body.status === appointment.status) return false;
+  const attendanceStatuses = new Set(["booked", "completed", "no-show"]);
+  return attendanceStatuses.has(body.status) || attendanceStatuses.has(appointment.status);
 }
 
 function createReferral(db, body) {

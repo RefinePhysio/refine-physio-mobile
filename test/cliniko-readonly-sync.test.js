@@ -7,6 +7,7 @@ import {
   syncCliniko,
   uploadReportPdfToCliniko,
   treatmentNotePdfFilename,
+  updateClinikoAppointmentFromApp,
   updateClinikoLocationEnabled,
   updateClinikoPractitionerEnabled,
   uploadTreatmentNotePdfToCliniko
@@ -811,6 +812,74 @@ test("Cliniko appointment write-back can be enabled separately from notes", asyn
     CLINIKO_APPOINTMENT_WRITE_ENABLED: "true",
     CLINIKO_NOTE_SYNC_ENABLED: "true",
     CLINIKO_REPORT_UPLOAD_ENABLED: "false"
+  });
+});
+
+test("Cliniko appointment write-back syncs attendance status from app", async () => {
+  const patchBodies = [];
+  const mockFetch = async (input, options = {}) => {
+    const url = new URL(String(input));
+
+    if (url.pathname === "/v1/individual_appointments/7001" && (options.method || "GET") === "GET") {
+      return jsonResponse({
+        links: { self: "https://mock.cliniko.test/v1/individual_appointments/7001" },
+        updated_at: "2026-05-27T03:00:00Z"
+      });
+    }
+
+    if (url.pathname === "/v1/individual_appointments/7001" && options.method === "PATCH") {
+      const body = JSON.parse(options.body);
+      patchBodies.push(body);
+      assert.deepEqual(body, { patient_arrived: true, did_not_arrive: false });
+      return jsonResponse({
+        links: { self: "https://mock.cliniko.test/v1/individual_appointments/7001" },
+        patient: { links: { self: "https://mock.cliniko.test/v1/patients/8801" } },
+        practitioner: { links: { self: "https://mock.cliniko.test/v1/practitioners/201" } },
+        appointment_type: { links: { self: "https://mock.cliniko.test/v1/appointment_types/301" } },
+        starts_at: "2026-06-03T00:00:00Z",
+        ends_at: "2026-06-03T01:00:00Z",
+        patient_arrived: true,
+        did_not_arrive: false,
+        updated_at: "2026-05-27T03:05:00Z"
+      });
+    }
+
+    return jsonResponse({ links: { next: null } });
+  };
+
+  await withMockCliniko(mockFetch, async () => {
+    const db = {
+      users: [{ id: "practitioner-1", role: "contractor", name: "Ella Mason", clinikoPractitionerId: "201", clinikoSyncEnabled: true }],
+      clients: [{ id: "client-1", name: "Ava Taylor", clinikoPatientId: "8801" }],
+      appointments: [],
+      appointmentTypes: [{ id: "type-1", name: "Initial Physiotherapy Assessment SAH", clinikoAppointmentTypeId: "301" }],
+      clinikoLocations: [{ id: "location-1", clinikoBusinessId: "401", enabled: true }],
+      clinikoSyncLogs: [],
+      syncErrors: []
+    };
+    const appointment = {
+      id: "appt-1",
+      clinikoId: "7001",
+      clinikoUpdatedAt: "2026-05-27T03:00:00Z",
+      clinikoAppointmentTypeId: "301",
+      clientId: "client-1",
+      contractorId: "practitioner-1",
+      appointmentType: "Initial Physiotherapy SAH",
+      status: "booked",
+      startsAt: "2026-06-03T00:00:00Z",
+      endsAt: "2026-06-03T01:00:00Z"
+    };
+
+    const result = await updateClinikoAppointmentFromApp(db, appointment, { status: "completed" });
+
+    assert.equal(result.status, "synced");
+    assert.equal(patchBodies.length, 1);
+    assert.equal(appointment.status, "completed");
+    assert.equal(appointment.syncStatus, "synced");
+    assert.equal(appointment.clinikoUpdatedAt, "2026-05-27T03:05:00Z");
+    assert.equal(db.clinikoSyncLogs.some((log) => log.operation === "appointment_write"), true);
+  }, {
+    CLINIKO_APPOINTMENT_WRITE_ENABLED: "true"
   });
 });
 

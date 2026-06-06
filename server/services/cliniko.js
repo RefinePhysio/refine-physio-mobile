@@ -1486,7 +1486,7 @@ export async function updateClinikoAppointmentFromApp(db, appointment, changes =
       operation: "appointment_write",
       entityType: "appointment",
       entityId: appointment.id,
-      message: "Appointment time/type updated in Cliniko."
+      message: "Appointment updated in Cliniko."
     });
     return { status: "synced", appointment };
   } catch (error) {
@@ -1501,6 +1501,9 @@ function buildClinikoAppointmentUpdatePayload(db, appointment, changes) {
   const body = {};
   if (Object.hasOwn(changes, "startsAt") && changes.startsAt !== appointment.startsAt) body.starts_at = changes.startsAt;
   if (Object.hasOwn(changes, "endsAt") && changes.endsAt !== appointment.endsAt) body.ends_at = changes.endsAt;
+  if (Object.hasOwn(changes, "status") && changes.status !== appointment.status) {
+    Object.assign(body, clinikoAttendanceFields(changes.status, appointment.status));
+  }
 
   const wantsTypeChange = Object.hasOwn(changes, "appointmentType")
     || Object.hasOwn(changes, "recurrence")
@@ -1516,6 +1519,15 @@ function buildClinikoAppointmentUpdatePayload(db, appointment, changes) {
   }
 
   return { body };
+}
+
+function clinikoAttendanceFields(nextStatus, previousStatus = "") {
+  if (nextStatus === "completed") return { patient_arrived: true, did_not_arrive: false };
+  if (nextStatus === "no-show") return { patient_arrived: false, did_not_arrive: true };
+  if (nextStatus === "booked" && ["completed", "no-show"].includes(previousStatus)) {
+    return { patient_arrived: false, did_not_arrive: false };
+  }
+  return {};
 }
 
 function resolveClinikoAppointmentTypeId(db, appointment, changes) {
@@ -1558,6 +1570,9 @@ function applyClinikoAppointmentUpdate(db, appointment, updated, payload) {
   const appointmentType = db.appointmentTypes.find((item) => String(item.clinikoAppointmentTypeId || "") === String(typeId));
   const previousClinikoAppointmentNote = appointment.clinikoAppointmentNote || "";
   const nextClinikoAppointmentNote = typeof updated.notes === "string" ? updated.notes : previousClinikoAppointmentNote;
+  const patientArrived = typeof updated.patient_arrived === "boolean" ? updated.patient_arrived : payload.patient_arrived;
+  const didNotArrive = typeof updated.did_not_arrive === "boolean" ? updated.did_not_arrive : payload.did_not_arrive;
+  const attendanceWasUpdated = Object.hasOwn(payload, "patient_arrived") || Object.hasOwn(payload, "did_not_arrive");
   appointment.startsAt = updated.starts_at || payload.starts_at || appointment.startsAt;
   appointment.endsAt = updated.ends_at || payload.ends_at || appointment.endsAt;
   appointment.clinikoAppointmentTypeId = String(typeId || "");
@@ -1569,7 +1584,15 @@ function applyClinikoAppointmentUpdate(db, appointment, updated, payload) {
   }
   appointment.clinikoUpdatedAt = updated.updated_at || appointment.clinikoUpdatedAt || "";
   appointment.clinikoStatus = updated.cancelled_at ? "cancelled_in_cliniko" : "synced";
-  appointment.status = updated.cancelled_at ? "cancelled" : updated.did_not_arrive ? "no-show" : updated.patient_arrived ? "completed" : appointment.status || "booked";
+  appointment.status = updated.cancelled_at
+    ? "cancelled"
+    : didNotArrive
+    ? "no-show"
+    : patientArrived
+    ? "completed"
+    : attendanceWasUpdated
+    ? "booked"
+    : appointment.status || "booked";
   appointment.syncStatus = "synced";
   appointment.syncError = "";
 }

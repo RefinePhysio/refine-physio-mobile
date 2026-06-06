@@ -6159,11 +6159,11 @@ function bindViewEvents() {
       const appointment = state.data.appointments.find((item) => item.id === button.dataset.id);
       const selectedStatus = button.dataset.status;
       const status = appointment?.status === selectedStatus ? "booked" : selectedStatus;
-      await fetchJson(`/api/appointments/${button.dataset.id}`, {
+      const saved = await fetchJson(`/api/appointments/${button.dataset.id}`, {
         method: "PATCH",
         body: { status, actorId: state.data.currentUser.id }
       });
-      toast(status === "booked" ? "Appointment status cleared" : "Appointment updated");
+      toast(appointmentStatusSyncMessage(saved, status));
       await loadData();
     });
   });
@@ -6960,6 +6960,17 @@ function bookingSyncMessage(appointment, fallback) {
   if (appointment.syncStatus === "failed") return `${fallback}, but Cliniko sync failed${appointment.syncError ? `: ${appointment.syncError}` : ""}`;
   if (appointment.syncStatus === "pending") return `${fallback}; Cliniko sync pending`;
   return fallback;
+}
+
+function appointmentStatusSyncMessage(appointment, status) {
+  const cleared = status === "booked";
+  if (appointment?.syncStatus === "synced" && appointment.clinikoId) {
+    return cleared ? "Attendance cleared in Cliniko" : "Attendance saved to Cliniko";
+  }
+  if (appointment?.syncStatus === "failed") {
+    return appointment.syncError ? `Cliniko update failed: ${appointment.syncError}` : "Cliniko update failed";
+  }
+  return cleared ? "Appointment status cleared" : "Appointment updated";
 }
 
 function setFormSubmitting(form, isSubmitting, label = "Saving...") {
