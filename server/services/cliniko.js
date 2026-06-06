@@ -1472,15 +1472,27 @@ export async function updateClinikoAppointmentFromApp(db, appointment, changes =
       return { status: "failed", message: payload.error };
     }
 
-    if (!Object.keys(payload.body).length) return { skipped: true, status: "no_changes", message: "No Cliniko appointment changes to save." };
+    if (!Object.keys(payload.body).length && !payload.attendance) {
+      return { skipped: true, status: "no_changes", message: "No Cliniko appointment changes to save." };
+    }
 
     appointment.syncStatus = "pending";
     appointment.syncError = "";
-    const updated = await clinikoFetch(`/individual_appointments/${encodeURIComponent(appointment.clinikoId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload.body)
+    let updated = latest;
+    if (Object.keys(payload.body).length) {
+      updated = await clinikoFetch(`/individual_appointments/${encodeURIComponent(appointment.clinikoId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload.body)
+      });
+    }
+    if (payload.attendance) {
+      await updateClinikoAppointmentAttendance(appointment, payload.attendance);
+      updated = await clinikoFetch(`/individual_appointments/${encodeURIComponent(appointment.clinikoId)}`);
+    }
+    applyClinikoAppointmentUpdate(db, appointment, updated, {
+      ...payload.body,
+      ...clinikoAttendanceSnapshot(payload.attendance)
     });
-    applyClinikoAppointmentUpdate(db, appointment, updated, payload.body);
     syncLog(db, {
       status: "synced",
       operation: "appointment_write",
@@ -1499,10 +1511,11 @@ export async function updateClinikoAppointmentFromApp(db, appointment, changes =
 
 function buildClinikoAppointmentUpdatePayload(db, appointment, changes) {
   const body = {};
+  let attendance = null;
   if (Object.hasOwn(changes, "startsAt") && changes.startsAt !== appointment.startsAt) body.starts_at = changes.startsAt;
   if (Object.hasOwn(changes, "endsAt") && changes.endsAt !== appointment.endsAt) body.ends_at = changes.endsAt;
   if (Object.hasOwn(changes, "status") && changes.status !== appointment.status) {
-    Object.assign(body, clinikoAttendanceFields(changes.status, appointment.status));
+    attendance = clinikoAttendanceFields(changes.status, appointment.status);
   }
 
   const wantsTypeChange = Object.hasOwn(changes, "appointmentType")
@@ -1518,16 +1531,48 @@ function buildClinikoAppointmentUpdatePayload(db, appointment, changes) {
     }
   }
 
-  return { body };
+  return { body, attendance };
 }
 
 function clinikoAttendanceFields(nextStatus, previousStatus = "") {
-  if (nextStatus === "completed") return { patient_arrived: true, did_not_arrive: false };
-  if (nextStatus === "no-show") return { patient_arrived: false, did_not_arrive: true };
+  if (nextStatus === "completed") return { arrived: true };
+  if (nextStatus === "no-show") return { arrived: false };
   if (nextStatus === "booked" && ["completed", "no-show"].includes(previousStatus)) {
-    return { patient_arrived: false, did_not_arrive: false };
+    return { arrived: null };
   }
-  return {};
+  return null;
+}
+
+function clinikoAttendanceSnapshot(attendance) {
+  if (!attendance) return {};
+  if (attendance.arrived === true) return { patient_arrived: true, did_not_arrive: false };
+  if (attendance.arrived === false) return { patient_arrived: false, did_not_arrive: true };
+  return { patient_arrived: false, did_not_arrive: false };
+}
+
+async function updateClinikoAppointmentAttendance(appointment, attendance) {
+  const attendee = await findClinikoAppointmentAttendee(appointment);
+  const attendeeId = linkedId(attendee);
+  if (!attendeeId) {
+    throw new ClinikoApiError("Cliniko appointment attendee could not be found for attendance write-back.");
+  }
+  return clinikoFetch(`/attendees/${encodeURIComponent(attendeeId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ arrived: attendance.arrived })
+  });
+}
+
+async function findClinikoAppointmentAttendee(appointment) {
+  const attendees = await listResource(
+    `/individual_appointments/${encodeURIComponent(appointment.clinikoId)}/attendees?per_page=100`,
+    "attendees",
+    1
+  );
+  const activeAttendees = attendees.filter((attendee) => !attendee.archived_at && !attendee.deleted_at);
+  const patientId = String(appointment.clinikoPatientId || "").trim();
+  return activeAttendees.find((attendee) => String(linkedIdFromRecord(attendee, "patient")) === patientId)
+    || activeAttendees[0]
+    || null;
 }
 
 function resolveClinikoAppointmentTypeId(db, appointment, changes) {

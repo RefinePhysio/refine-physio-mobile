@@ -9073,25 +9073,35 @@ h3,
   }
 
   .mobile-calendar-picker .mini-month-title {
+    align-items: center;
     gap: 8px;
-    grid-template-columns: 44px minmax(10rem, 1fr) 44px;
+    grid-template-columns: 42px minmax(12rem, 1fr) 42px;
     margin-bottom: 10px;
+    width: 100%;
   }
 
   .mobile-calendar-picker .mini-month-title button {
     border-radius: 10px;
     color: #0c4259;
+    display: grid;
     font-size: 1.35rem;
     height: 40px;
+    justify-self: center;
     min-height: 40px;
     min-width: 40px;
+    place-items: center;
     width: 40px;
   }
 
   .mobile-calendar-picker .mini-month-title strong {
     color: #0c4259;
-    font-size: 1rem;
+    display: block;
+    font-size: 1.08rem;
+    font-weight: 900;
+    line-height: 1.2;
+    min-width: 0;
     overflow: visible;
+    text-align: center;
     text-overflow: clip;
     white-space: normal;
   }

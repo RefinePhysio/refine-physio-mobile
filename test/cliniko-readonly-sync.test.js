@@ -816,21 +816,15 @@ test("Cliniko appointment write-back can be enabled separately from notes", asyn
 });
 
 test("Cliniko appointment write-back syncs attendance status from app", async () => {
-  const patchBodies = [];
+  let appointmentGetCount = 0;
+  const attendancePatchBodies = [];
   const mockFetch = async (input, options = {}) => {
     const url = new URL(String(input));
+    const method = options.method || "GET";
 
-    if (url.pathname === "/v1/individual_appointments/7001" && (options.method || "GET") === "GET") {
-      return jsonResponse({
-        links: { self: "https://mock.cliniko.test/v1/individual_appointments/7001" },
-        updated_at: "2026-05-27T03:00:00Z"
-      });
-    }
-
-    if (url.pathname === "/v1/individual_appointments/7001" && options.method === "PATCH") {
-      const body = JSON.parse(options.body);
-      patchBodies.push(body);
-      assert.deepEqual(body, { patient_arrived: true, did_not_arrive: false });
+    if (url.pathname === "/v1/individual_appointments/7001" && method === "GET") {
+      appointmentGetCount += 1;
+      const arrived = appointmentGetCount > 1;
       return jsonResponse({
         links: { self: "https://mock.cliniko.test/v1/individual_appointments/7001" },
         patient: { links: { self: "https://mock.cliniko.test/v1/patients/8801" } },
@@ -838,9 +832,32 @@ test("Cliniko appointment write-back syncs attendance status from app", async ()
         appointment_type: { links: { self: "https://mock.cliniko.test/v1/appointment_types/301" } },
         starts_at: "2026-06-03T00:00:00Z",
         ends_at: "2026-06-03T01:00:00Z",
-        patient_arrived: true,
+        patient_arrived: arrived,
         did_not_arrive: false,
-        updated_at: "2026-05-27T03:05:00Z"
+        updated_at: arrived ? "2026-05-27T03:05:00Z" : "2026-05-27T03:00:00Z"
+      });
+    }
+
+    if (url.pathname === "/v1/individual_appointments/7001/attendees" && method === "GET") {
+      return jsonResponse({
+        attendees: [
+          {
+            links: { self: "https://mock.cliniko.test/v1/attendees/9901" },
+            patient: { links: { self: "https://mock.cliniko.test/v1/patients/8801" } },
+            arrived: false
+          }
+        ],
+        links: { next: null }
+      });
+    }
+
+    if (url.pathname === "/v1/attendees/9901" && method === "PATCH") {
+      const body = JSON.parse(options.body);
+      attendancePatchBodies.push(body);
+      assert.deepEqual(body, { arrived: true });
+      return jsonResponse({
+        links: { self: "https://mock.cliniko.test/v1/attendees/9901" },
+        arrived: true
       });
     }
 
@@ -860,6 +877,7 @@ test("Cliniko appointment write-back syncs attendance status from app", async ()
     const appointment = {
       id: "appt-1",
       clinikoId: "7001",
+      clinikoPatientId: "8801",
       clinikoUpdatedAt: "2026-05-27T03:00:00Z",
       clinikoAppointmentTypeId: "301",
       clientId: "client-1",
@@ -873,7 +891,8 @@ test("Cliniko appointment write-back syncs attendance status from app", async ()
     const result = await updateClinikoAppointmentFromApp(db, appointment, { status: "completed" });
 
     assert.equal(result.status, "synced");
-    assert.equal(patchBodies.length, 1);
+    assert.equal(attendancePatchBodies.length, 1);
+    assert.equal(appointmentGetCount, 2);
     assert.equal(appointment.status, "completed");
     assert.equal(appointment.syncStatus, "synced");
     assert.equal(appointment.clinikoUpdatedAt, "2026-05-27T03:05:00Z");
@@ -882,7 +901,6 @@ test("Cliniko appointment write-back syncs attendance status from app", async ()
     CLINIKO_APPOINTMENT_WRITE_ENABLED: "true"
   });
 });
-
 test("Cliniko appointment creation syncs app bookings and creates new patients when needed", async () => {
   const createdPatients = [];
   const createdAppointments = [];

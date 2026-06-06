@@ -5760,6 +5760,10 @@ async function submitLogin(event) {
     await fetchJson("/api/auth/login", { method: "POST", body: payload });
     state.loginLoading = false;
     state.tab = state.loginDestination === "handbook" ? "handbook" : "";
+    if (state.loginDestination !== "handbook") {
+      setCalendarDateKey(dateKeyFromParts(brisbaneParts(new Date())));
+      state.calendarMonthPickerOpen = false;
+    }
     state.tabHistory = [];
     await loadData();
     void syncClinikoForeground({ reason: "login", force: true, quiet: true });
@@ -8180,9 +8184,9 @@ function calendarRangeLabel(mode = effectiveCalendarMode()) {
   const lastDate = new Date(Date.UTC(last.year, last.month - 1, last.day));
   const firstOptions = {
     day: "numeric",
+    month: "short",
     timeZone: "Australia/Brisbane"
   };
-  if (first.month !== last.month || first.year !== last.year) firstOptions.month = "short";
   const firstLabel = new Intl.DateTimeFormat("en-AU", firstOptions).format(firstDate);
   const lastLabel = new Intl.DateTimeFormat("en-AU", {
     day: "numeric",
