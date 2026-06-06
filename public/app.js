@@ -21,6 +21,7 @@ const state = {
   data: null,
   autoRefreshInFlight: false,
   foregroundSyncInFlight: false,
+  attendanceSavingAppointmentIds: new Set(),
   lastForegroundSyncAt: 0,
   loginLoading: false,
   loginError: "",
@@ -4813,6 +4814,7 @@ function renderAppointmentDetailModal() {
   const nextAppointment = nextAppointmentForClient(appointment);
   const durationMinutes = appointmentDurationMinutes(appointment);
   const isRescheduling = state.calendarAppointmentMode === "reschedule";
+  const attendanceSaving = state.attendanceSavingAppointmentIds.has(appointment.id);
   const clinicalActions = appointmentClinicalActions(appointment);
   const showTreatmentNote = clinicalActions.showTreatmentNote;
   const showReport = clinicalActions.showReport;
@@ -4917,8 +4919,8 @@ function renderAppointmentDetailModal() {
             <div class="appointment-action-group appointment-action-attendance">
               <span class="appointment-action-label">Attendance</span>
               <div class="appointment-action-row">
-                <button type="button" class="${appointmentStatusButtonClass(appointment, "completed")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="completed">Arrived</button>
-                <button type="button" class="${appointmentStatusButtonClass(appointment, "no-show")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="no-show">Did not arrive</button>
+                <button type="button" class="${appointmentStatusButtonClass(appointment, "completed")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="completed" ${attendanceSaving ? "disabled" : ""}>Arrived</button>
+                <button type="button" class="${appointmentStatusButtonClass(appointment, "no-show")}" data-action="appointment-status" data-id="${escapeHtml(appointment.id)}" data-status="no-show" ${attendanceSaving ? "disabled" : ""}>Did not arrive</button>
               </div>
             </div>
             <div class="appointment-action-group appointment-action-travel">
@@ -6161,14 +6163,32 @@ function bindViewEvents() {
   document.querySelectorAll("[data-action='appointment-status']").forEach((button) => {
     button.addEventListener("click", async () => {
       const appointment = state.data.appointments.find((item) => item.id === button.dataset.id);
+      if (!appointment || state.attendanceSavingAppointmentIds.has(appointment.id)) return;
       const selectedStatus = button.dataset.status;
       const status = appointment?.status === selectedStatus ? "booked" : selectedStatus;
-      const saved = await fetchJson(`/api/appointments/${button.dataset.id}`, {
-        method: "PATCH",
-        body: { status, actorId: state.data.currentUser.id }
+      const previous = { ...appointment };
+      applyAppointmentLocalUpdate(appointment.id, {
+        status,
+        syncStatus: appointment.clinikoId ? "pending" : appointment.syncStatus,
+        syncError: ""
       });
-      toast(appointmentStatusSyncMessage(saved, status));
-      await loadData();
+      state.attendanceSavingAppointmentIds.add(appointment.id);
+      render();
+
+      try {
+        const saved = await fetchJson(`/api/appointments/${button.dataset.id}`, {
+          method: "PATCH",
+          body: { status, actorId: state.data.currentUser.id }
+        });
+        applyAppointmentLocalUpdate(appointment.id, saved);
+        toast(appointmentStatusSyncMessage(saved, status));
+      } catch (error) {
+        applyAppointmentLocalUpdate(appointment.id, previous);
+        toast(error.message || "Could not update attendance");
+      } finally {
+        state.attendanceSavingAppointmentIds.delete(appointment.id);
+        render();
+      }
     });
   });
 
@@ -6975,6 +6995,13 @@ function appointmentStatusSyncMessage(appointment, status) {
     return appointment.syncError ? `Cliniko update failed: ${appointment.syncError}` : "Cliniko update failed";
   }
   return cleared ? "Appointment status cleared" : "Appointment updated";
+}
+
+function applyAppointmentLocalUpdate(appointmentId, updates = {}) {
+  const appointment = state.data?.appointments?.find((item) => item.id === appointmentId);
+  if (!appointment) return null;
+  Object.assign(appointment, updates);
+  return appointment;
 }
 
 function setFormSubmitting(form, isSubmitting, label = "Saving...") {
