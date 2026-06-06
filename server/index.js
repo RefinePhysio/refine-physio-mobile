@@ -654,6 +654,15 @@ async function routeApi(req, res, url) {
     return;
   }
 
+  if (method === "DELETE" && parts[1] === "clients" && parts[2]) {
+    if (!requireRole(res, auth.user, ["admin"])) return;
+    const result = deleteUnlinkedClient(db, parts[2], auth.user.id);
+    if (result.error) return sendJson(res, result.status, { error: result.error, linked: result.linked });
+    await writeDb(db);
+    sendJson(res, 200, result);
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/api/reception-bookings") {
     const body = await readJsonBody(req);
     if (!requireRole(res, auth.user, ["admin", "receptionist"])) return;
@@ -1170,6 +1179,34 @@ function requireRole(res, user, roles) {
 function canAccessAppointment(db, user, appointment) {
   if (["admin", "receptionist"].includes(user.role)) return true;
   return user.role === "contractor" && appointment.contractorId === user.id;
+}
+
+function deleteUnlinkedClient(db, clientId, actorId) {
+  const index = db.clients.findIndex((client) => client.id === clientId);
+  if (index === -1) return { status: 404, error: "Client not found." };
+
+  const linked = {
+    appointments: (db.appointments || []).filter((item) => item.clientId === clientId).length,
+    referrals: (db.referrals || []).filter((item) => item.clientId === clientId).length,
+    treatmentNotes: (db.treatmentNotes || []).filter((item) => item.clientId === clientId).length,
+    reports: (db.reports || []).filter((item) => item.clientId === clientId).length,
+    approvalRequests: (db.approvalRequests || []).filter((item) => item.clientId === clientId).length,
+    rebookStatuses: (db.rebookStatuses || []).filter((item) => item.clientId === clientId).length,
+    inboxItems: (db.inboxItems || []).filter((item) => item.clientId === clientId).length,
+    notifications: (db.notifications || []).filter((item) => item.clientId === clientId).length
+  };
+  const totalLinked = Object.values(linked).reduce((total, count) => total + count, 0);
+  if (totalLinked) {
+    return {
+      status: 409,
+      error: "Client still has linked records. Remove or archive the linked records before deleting the client.",
+      linked
+    };
+  }
+
+  const [client] = db.clients.splice(index, 1);
+  logActivity(db, actorId, "deleted_unlinked_client", "client", client.id);
+  return { deleted: 1, clientId: client.id, clientName: client.name };
 }
 
 function canAccessTreatmentNote(db, user, note) {
