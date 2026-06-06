@@ -1862,6 +1862,17 @@ function renderOnboardingHub() {
         </aside>
 
         <article class="onboarding-content" style="--section-accent:${escapeHtml(sectionAccent)};--section-soft:${escapeHtml(sectionSoft)}">
+          <label class="onboarding-mobile-section-picker">
+            <span>Choose handbook section</span>
+            <select data-action="onboarding-mobile-section">
+              ${onboardingSections.map((section) => `
+                <option value="${escapeHtml(section.id)}" ${section.id === activeSection.id ? "selected" : ""}>
+                  ${escapeHtml(section.number)} - ${escapeHtml(section.title)}
+                </option>
+              `).join("")}
+            </select>
+          </label>
+
           <div class="onboarding-content-header">
             <div>
               <span class="onboarding-eyebrow">${escapeHtml(activeSection.eyebrow)}</span>
@@ -5818,6 +5829,11 @@ function bindViewEvents() {
       setOnboardingSection(button.dataset.sectionId || "");
       render();
     });
+  });
+
+  document.querySelector("[data-action='onboarding-mobile-section']")?.addEventListener("change", (event) => {
+    setOnboardingSection(event.currentTarget.value || "");
+    render();
   });
 
   document.querySelector("[data-action='onboarding-complete']")?.addEventListener("click", (event) => {
