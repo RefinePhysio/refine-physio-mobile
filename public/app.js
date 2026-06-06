@@ -24,6 +24,7 @@ const state = {
   lastForegroundSyncAt: 0,
   loginLoading: false,
   loginError: "",
+  loginDestination: localStorage.getItem("refine-login-destination") || "schedule",
   forgotMessage: "",
   forgotMode: false,
   tab: new URLSearchParams(window.location.search).get("tab") || localStorage.getItem("refine-active-tab") || "",
@@ -67,6 +68,7 @@ const state = {
   reportEquipmentTrialCount: 0,
   reportEquipmentOptionCounts: {},
   messageThreadUserId: "",
+  onboardingSectionId: localStorage.getItem("refine-onboarding-section") || "welcome",
   reportType: "Initial Physiotherapy Assessment Report",
   tabMenuOpen: false,
   expandedReportReviewId: "",
@@ -82,7 +84,8 @@ const adminTabs = [
   ["adminReports", "Reports"],
   ["referrals", "Referrals"],
   ["archived", "Archived"],
-  ["cliniko", "Cliniko"]
+  ["cliniko", "Cliniko"],
+  ["handbook", "Handbook"]
 ];
 
 const receptionistTabs = [
@@ -91,7 +94,8 @@ const receptionistTabs = [
   ["messages", "Messages"],
   ["adminReports", "Reports"],
   ["referrals", "Referrals"],
-  ["archived", "Archived"]
+  ["archived", "Archived"],
+  ["handbook", "Handbook"]
 ];
 
 const contractorTabs = [
@@ -100,8 +104,781 @@ const contractorTabs = [
   ["clients", "Clients"],
   ["requests", "Approvals"],
   ["updates", "Updates"],
-  ["messages", "Messages"]
+  ["messages", "Messages"],
+  ["handbook", "Handbook"]
 ];
+
+const onboardingSections = [
+  {
+    id: "welcome",
+    number: "01",
+    title: "Welcome to Refine",
+    eyebrow: "Start here",
+    image: "/onboarding-illustrations/diverse-physio-team.png",
+    summary: "A warm introduction to who we are, what we value, and what makes Refine Physio Mobile different.",
+    cards: [
+      ["Our focus", "Deliver great care, communicate well, and treat every client with respect and compassion."],
+      ["Who we are", "A mobile allied health team supporting people in homes, aged care settings, communities and workplaces."],
+      ["The Refine Way", "Put clients first, be reliable, communicate early, document well, and keep learning."],
+      ["What success looks like", "Care deeply, communicate clearly, complete documentation, work collaboratively and represent Refine professionally."]
+    ],
+    checklist: [
+      "Read Katie's welcome message",
+      "Understand the Refine mission, vision and values",
+      "Know what the Refine client experience should feel like",
+      "Ask early whenever something is unclear"
+    ]
+  },
+  {
+    id: "working",
+    number: "02",
+    title: "Working at Refine",
+    eyebrow: "Daily expectations",
+    image: "/onboarding-illustrations/01-team-bonding-diverse.png",
+    summary: "The practical basics: compliance, communication, presentation, safety, privacy and how we stay connected as a team.",
+    cards: [
+      ["Before seeing clients", "Make sure your contractor agreement, AHPRA, ABN, insurance, checks, bank details and app access are complete."],
+      ["Communication", "Respond to admin where possible within 1 business day and notify admin early about concerns, delays or schedule changes."],
+      ["Team updates", "Telegram may be used for announcements, referral opportunities, training, operational updates and team culture."],
+      ["Privacy", "Never share client-identifiable information in group chats, social media or personal storage."]
+    ],
+    checklist: [
+      "Keep registrations, checks and insurances current",
+      "Use approved communication channels",
+      "Keep Telegram notifications on for important updates",
+      "Maintain professional presentation and boundaries",
+      "Tell admin immediately if you feel unsafe"
+    ]
+  },
+  {
+    id: "referrals",
+    number: "03",
+    title: "Referrals & Caseload",
+    eyebrow: "Client journey",
+    image: "/onboarding-illustrations/paediatric-family-support.png",
+    summary: "How referrals are received, allocated and managed, and how clinicians manage ongoing scheduling and caseloads.",
+    cards: [
+      ["Admin starts the journey", "Administration gathers referral information, confirms funding and books initial assessments."],
+      ["Your role after allocation", "Review referral information, attend the assessment, complete documentation and plan ongoing management."],
+      ["Ongoing scheduling", "After the initial assessment, the treating physiotherapist manages ongoing appointments with the client."],
+      ["Keep admin informed", "Tell admin about regular cancellations, discharges, significant changes or anything affecting billing or funding."]
+    ],
+    checklist: [
+      "Review referral details before the first visit",
+      "Consider referral recommendations and clinical needs",
+      "Book future appointments where appropriate",
+      "Group appointments geographically where possible",
+      "Refer internally to OT or RMT when clinically useful"
+    ]
+  },
+  {
+    id: "leave-support",
+    number: "04",
+    title: "Leave, Illness & Support",
+    eyebrow: "You are not alone",
+    image: "/onboarding-illustrations/home-neuro-rehab.png",
+    summary: "What to do when illness, leave, vehicle issues or unexpected circumstances affect appointments.",
+    cards: [
+      ["If unwell", "Do not attend client appointments if sick or contagious. Many clients are vulnerable."],
+      ["Planned leave", "Provide as much notice as possible, ideally at least four weeks for planned leave."],
+      ["Handovers", "Keep notes, goals, equipment recommendations, outstanding actions and concerns up to date."],
+      ["Support", "Ask for help with clinical concerns, reports, funding questions, scheduling or difficult conversations."]
+    ],
+    checklist: [
+      "Notify admin as soon as possible if appointments are affected",
+      "Provide affected clients, dates and urgent concerns",
+      "Keep documentation current before leave",
+      "Trust your instincts around personal safety",
+      "Reach out early instead of guessing"
+    ]
+  },
+  {
+    id: "documentation",
+    number: "05",
+    title: "Documentation & Reporting",
+    eyebrow: "Clinical records",
+    image: "/onboarding-illustrations/05-care-plan-tablet.png",
+    summary: "How to write meaningful notes and reports that support care, funding, clinical reasoning and continuity.",
+    cards: [
+      ["Treatment notes", "Complete within 24 hours. Same-day notes are preferred where possible."],
+      ["Initial reports", "Complete and submit within 2 business days of the assessment."],
+      ["Equipment reports", "Complete and submit within 2 business days of the trial."],
+      ["Good notes answer", "What did you do? Why did you do it? How did the client respond? What is the plan?"]
+    ],
+    checklist: [
+      "Document assessment findings, treatment and client response",
+      "Show progress toward goals and clinical reasoning",
+      "Communicate report delays early",
+      "Use admin review for signed-off reports",
+      "Ask for support with complex reports"
+    ]
+  },
+  {
+    id: "clinical",
+    number: "06",
+    title: "Clinical Practice",
+    eyebrow: "Care standards",
+    image: "/onboarding-illustrations/hydrotherapy-session.png",
+    summary: "The clinical principles behind safe, evidence-based, goal-directed and client-centred physiotherapy.",
+    cards: [
+      ["Goals", "Goals should be specific, meaningful, measurable and functional."],
+      ["Falls", "Assess falls history, environment, mobility, balance and education needs where relevant."],
+      ["Escalation", "Notify admin immediately for falls with injury, deterioration, safeguarding concerns or safety risks."],
+      ["Equipment", "Consider safety, function, independence, client goals, environment and long-term suitability."]
+    ],
+    checklist: [
+      "Work within scope and seek support when needed",
+      "Use clinical reasoning in every session",
+      "Trial equipment where appropriate before recommending",
+      "Document equipment justification clearly",
+      "Make every appointment purposeful"
+    ]
+  },
+  {
+    id: "resources",
+    number: "07",
+    title: "Consumables & Resources",
+    eyebrow: "Tools for care",
+    image: "/onboarding-illustrations/04-mobile-physio-driving.png",
+    summary: "Supplies, templates, software, support and resources available to help clinicians deliver great care.",
+    cards: [
+      ["Consumables", "Refine may supply approved items such as Physiocrem, massage oil, resistance bands and printed resources."],
+      ["Running low", "Tell admin early so supplies can be arranged before they run out."],
+      ["Templates", "Use provided note, initial assessment, equipment trial and review templates where available."],
+      ["Feedback", "Share ideas for better workflows, software improvements, documentation processes and client experience."]
+    ],
+    checklist: [
+      "Request supplies before they run low",
+      "Arrange collection or Bowen Hills pickup where applicable",
+      "Use Refine Mobile and Cliniko as trained",
+      "Ask for report writing support when needed",
+      "Collaborate with the wider clinical team"
+    ]
+  },
+  {
+    id: "payments",
+    number: "08",
+    title: "Contractor Payments",
+    eyebrow: "Simple process",
+    image: "/onboarding-illustrations/05-care-plan-tablet.png",
+    summary: "The simple payment workflow contractors need to know: statements, invoices, billable services and funding approvals.",
+    cards: [
+      ["Fortnightly payments", "Administration reviews billable appointments and approved reports at the end of each pay period."],
+      ["Statements", "A contractor statement is prepared and sent to you for review."],
+      ["Invoice", "You submit a matching tax invoice before payment is processed."],
+      ["Travel", "At the time of publication, Refine does not bill travel. Contractors manage fuel, vehicle expenses and maintenance."]
+    ],
+    checklist: [
+      "Review contractor statements carefully",
+      "Submit a matching invoice",
+      "Ask admin before proceeding if approval or funding is unclear",
+      "Consider travel efficiency when booking",
+      "Contact admin with statement questions"
+    ]
+  },
+  {
+    id: "conduct",
+    number: "09",
+    title: "Client Relationships & Conduct",
+    eyebrow: "Trust and privacy",
+    image: "/onboarding-illustrations/wheelchair-disability-physio.png",
+    summary: "How we protect client relationships, privacy, confidentiality, professional boundaries and the Refine brand.",
+    cards: [
+      ["Our clients", "Clients introduced through Refine remain clients of Refine Physio Mobile."],
+      ["Boundaries", "Do not provide personal phone numbers, personal emails or personal social media accounts to clients."],
+      ["Confidentiality", "Protect client, referral partner, funding, pricing, operations and internal systems information."],
+      ["Social media", "Do not post identifiable client information, photos or videos without appropriate consent."]
+    ],
+    checklist: [
+      "Respect relationships introduced through Refine",
+      "Communicate openly about conflicts of interest",
+      "Use approved business channels",
+      "Ask before taking or sharing photos/videos",
+      "Notify admin promptly about complaints"
+    ]
+  },
+  {
+    id: "growth",
+    number: "10",
+    title: "Growth & Welcome",
+    eyebrow: "The heart of Refine",
+    image: "/onboarding-illustrations/06-team-celebration-diverse.png",
+    summary: "A closing section about growth, professional development, feedback, meaningful work and being part of the Refine team.",
+    cards: [
+      ["Helping Refine grow", "Every positive interaction contributes to our reputation and creates more opportunities for clients and clinicians."],
+      ["Professional development", "We encourage clinical discussion, mentoring, peer support, skill development and knowledge sharing."],
+      ["Feedback", "Your ideas matter and help shape better systems, workflows and client experiences."],
+      ["Why it matters", "Every appointment is more than a treatment session. The work we do can improve confidence, independence and quality of life."]
+    ],
+    checklist: [
+      "Share referral opportunities with admin",
+      "Keep learning and asking questions",
+      "Suggest improvements when you see them",
+      "Take pride in the difference you make",
+      "Welcome to the Refine family"
+    ]
+  }
+];
+
+const onboardingArticleContent = {
+  welcome: [
+    {
+      title: "A Personal Welcome from Katie",
+      body: [
+        "Hi and welcome to Refine Physio,",
+        "I just wanted to take a moment to personally welcome you and say how excited we are to have you joining our team.",
+        "Starting somewhere new can be both exciting and a little overwhelming, so before anything else, I want you to know that we're genuinely grateful you've chosen to be part of Refine Physio. We know there are many opportunities out there, and it means a lot that you've decided to join us on this journey.",
+        "Refine Physio has always been more than just a physiotherapy business to me. It started from a passion for helping people live better lives and creating a workplace where clinicians feel supported, valued, and proud of the work they do. Over time, we've grown, but one thing has never changed: our people will always come first.",
+        "When I think about the team we're building, I don't just think about clinicians seeing clients. I think about a group of kind, passionate people who genuinely care about making a difference in their communities. People who support one another, celebrate each other's wins, and work together to provide exceptional care for every client we meet.",
+        "Whether you're seeing clients in their homes, in the community, or in our clinics, I want you to know that you're never doing it alone. Behind every appointment is a team that is here to support you. If you have questions, need advice, run into challenges, or simply want to bounce ideas around, please reach out. We are always happy to help.",
+        "One of the things I love most about allied health is the impact we get to make every day. Sometimes it's helping someone walk further than they thought possible. Sometimes it's helping someone remain independent in their own home. Sometimes it's simply being a friendly face during a difficult period in someone's life. Those moments matter, and they are the reason we do what we do.",
+        "As you settle in, my hope is that you'll feel welcomed, supported, and part of something meaningful. I want Refine Physio to be a place where you enjoy coming to work, where you can continue to grow professionally, and where you feel genuinely appreciated for the work you do.",
+        "Thank you for joining us and for trusting us with this next chapter of your career. We are incredibly lucky to have you on board, and I truly look forward to getting to know you and watching you thrive as part of our team.",
+        "Welcome to the Refine Physio family."
+      ],
+      image: "/onboarding-illustrations/katie-writing-welcome.png",
+      signature: ["With gratitude,", "Katie Hsiao", "Founder & Director", "Refine Physio"],
+      quote: "Alone we can do so little; together we can do so much.",
+      highlight: true
+    },
+    {
+      title: "Meet the Refine team",
+      body: [
+        "One of the greatest strengths of Refine Physio Mobile is our team. While every clinician brings their own experience, skills and personality, we all share the same goal: to provide exceptional care and make a meaningful difference in the lives of our clients."
+      ],
+      bullets: [
+        "Physiotherapists provide evidence-based assessment, treatment and rehabilitation.",
+        "Occupational Therapists support equipment prescriptions, home modifications, functional assessments and independence.",
+        "Remedial Massage Therapists provide soft tissue treatment, pain management and recovery support.",
+        "Administration supports referrals, scheduling, reports, invoicing, communication and daily operations."
+      ],
+      image: "/onboarding-illustrations/diverse-physio-team.png"
+    },
+    {
+      title: "Who we are",
+      body: [
+        "Refine Physio Mobile was built on a simple belief: great physiotherapy should be accessible, personal and delivered where it matters most.",
+        "Many clients face barriers accessing traditional clinic-based services. By bringing physiotherapy directly into homes, aged care facilities, communities and workplaces, we are able to provide care where clients feel most comfortable."
+      ],
+      bullets: ["NDIS participants", "Home Care Package clients", "CHSP clients", "DVA, Medicare, WorkCover, NIISQ and private clients"],
+      image: "/onboarding-illustrations/aged-care-group-exercise.png"
+    },
+    {
+      title: "Mission, vision and values",
+      body: [
+        "Our mission is to improve quality of life through accessible, evidence-based physiotherapy delivered in the environments most meaningful to our clients.",
+        "Our vision is to become Queensland's leading mobile allied health provider by delivering exceptional clinical outcomes, outstanding customer service and meaningful support to the communities we serve."
+      ],
+      bullets: ["Professionalism", "Reliability", "Communication", "Compassion", "Growth"]
+    },
+    {
+      title: "The Refine Way",
+      body: [
+        "The Refine Way is how we approach our work every day. Put clients first, be reliable, communicate early, document well and keep learning.",
+        "Documentation is not just paperwork. Good documentation protects clients, supports funding, demonstrates clinical reasoning, protects you professionally and supports continuity of care."
+      ],
+      image: "/onboarding-illustrations/paediatric-physio-play.png"
+    },
+    {
+      title: "The Refine client experience",
+      body: [
+        "When a client chooses Refine Physio Mobile, they should feel heard, supported, respected, valued and confident.",
+        "Clients are never just another appointment on the calendar. Every interaction matters."
+      ],
+      bullets: ["Heard", "Supported", "Respected", "Valued", "Confident"]
+    }
+  ],
+  working: [
+    {
+      title: "Contractor compliance checklist",
+      body: ["Before seeing clients on behalf of Refine Physio Mobile, please ensure all required documentation has been supplied and remains current."],
+      bullets: ["Signed Contractor Agreement", "Current AHPRA registration", "ABN registration", "Professional Indemnity and Public Liability Insurance", "Valid driver's licence", "National Police Check", "NDIS Worker Screening Check", "Blue Card where applicable", "Bank account and emergency contact details", "Access to Cliniko and Refine Mobile"],
+      image: "/onboarding-illustrations/05-care-plan-tablet.png"
+    },
+    {
+      title: "Important contacts",
+      body: [
+        "One of our core values is communication. If you are unsure about something, please ask.",
+        "Administration can assist with referrals, scheduling, service agreements, funding questions, invoicing, reports, client communication and general support.",
+        "Clinical support is available for complex presentations, equipment recommendations, report writing guidance, clinical concerns and treatment planning."
+      ]
+    },
+    {
+      title: "Communication and response expectations",
+      body: [
+        "Good communication helps us provide a better experience for clients, maintain referral relationships and support one another as a team.",
+        "Where possible, respond to administration messages within 1 business day, notify administration of significant client concerns as soon as possible, communicate anticipated report delays early and keep administration informed of major schedule changes."
+      ],
+      bullets: ["Tell admin if you are running behind", "Tell admin about complaints or concerns promptly", "Ask for support if unsure", "Early communication prevents most issues"]
+    },
+    {
+      title: "Professional standards",
+      body: [
+        "Professionalism extends beyond clinical skills. It includes how we present ourselves, communicate and represent Refine.",
+        "Contractors are expected to maintain a professional appearance, arrive on time wherever possible, act honestly and ethically, respect confidentiality, maintain boundaries and practise within scope."
+      ],
+      bullets: ["Refine branded shirt or polo", "Smart shorts, pants or skirt", "Professional closed-in footwear", "Neat and presentable appearance"],
+      image: "/onboarding-illustrations/diverse-physio-team.png"
+    },
+    {
+      title: "Vehicle expectations and mobile visits",
+      body: [
+        "Reliable transport is an important part of mobile physiotherapy. Contractors are responsible for maintaining a reliable, roadworthy vehicle, holding a valid driver's licence and managing their own fuel, insurance and vehicle expenses.",
+        "Your safety is important. If you ever feel unsafe, leave the environment immediately, contact administration and contact emergency services if required."
+      ],
+      image: "/onboarding-illustrations/04-mobile-physio-driving.png"
+    },
+    {
+      title: "Client communication and boundaries",
+      body: [
+        "Build positive relationships by being approachable, communicating clearly, listening actively, explaining treatment plans and setting realistic expectations.",
+        "To maintain professional boundaries, clinicians should not provide personal mobile numbers, personal email addresses or personal social media accounts to clients."
+      ]
+    },
+    {
+      title: "Social media, photography and privacy",
+      body: [
+        "Client privacy must always be respected. Do not share client information on social media, discuss identifiable information publicly, upload client information to personal devices or cloud storage, or share photographs without consent.",
+        "Photos and videos should only be taken when there is a legitimate clinical or business reason, appropriate consent has been obtained and Refine policies have been followed."
+      ]
+    },
+    {
+      title: "Team communication",
+      body: [
+        "Refine uses Telegram for team communication and announcements. It may be used for team updates, general announcements, referral opportunities, training opportunities, operational updates, clinic news and celebrating team achievements.",
+        "Client-identifiable information should never be shared within group chats. Where client-specific discussions are required, communicate directly with administration through approved channels."
+      ],
+      image: "/onboarding-illustrations/06-team-celebration-diverse.png"
+    }
+  ],
+  referrals: [
+    {
+      title: "How referrals work",
+      body: [
+        "Administration manages the referral process so clients are contacted promptly and services commence as quickly as possible.",
+        "Referrals may come from support coordinators, home care providers, case managers, hospitals, GPs, existing clients, family members, allied health professionals and community organisations."
+      ],
+      image: "/onboarding-illustrations/paediatric-family-support.png"
+    },
+    {
+      title: "Initial assessment scheduling",
+      body: [
+        "Administration is responsible for scheduling all initial assessments. When allocating referrals, administration will consider clinician availability, client location, travel requirements, clinical suitability, language requirements, funding source and client preferences where possible.",
+        "Once scheduled, the appointment will be entered into Cliniko and Refine Mobile and allocated to the treating physiotherapist."
+      ]
+    },
+    {
+      title: "Your responsibilities following allocation",
+      body: [
+        "Once a referral has been allocated, the treating physiotherapist is responsible for reviewing referral information, reviewing previous reports where available, attending the assessment, completing documentation, recommending treatment frequency, identifying equipment requirements and planning ongoing management."
+      ],
+      bullets: ["Review referral details before the visit", "Complete assessment documentation thoroughly", "Recommend treatment frequency", "Identify equipment requirements", "Plan ongoing management"]
+    },
+    {
+      title: "Understanding referral recommendations",
+      body: [
+        "Sometimes the referral source may request a preferred treatment frequency such as weekly physiotherapy, fortnightly physiotherapy, monthly physiotherapy, equipment assessment only or a review assessment.",
+        "If you believe a significantly different frequency is clinically appropriate, communicate this with administration so expectations can be managed with the referral source."
+      ]
+    },
+    {
+      title: "Ongoing appointment scheduling",
+      body: [
+        "Administration gets the client started. You manage the ongoing clinical journey.",
+        "Following the initial assessment, the treating physiotherapist is responsible for scheduling ongoing appointments with the client. This supports continuity of care and flexibility in managing your caseload."
+      ],
+      image: "/onboarding-illustrations/wheelchair-disability-physio.png"
+    },
+    {
+      title: "Travel and caseload management",
+      body: [
+        "As a mobile physiotherapist, travel is an important part of your role. Effective scheduling helps maximise productivity while reducing unnecessary travel.",
+        "Where possible, group appointments geographically and consider existing appointments nearby, travel time, peak traffic, client preferences and clinical urgency."
+      ]
+    },
+    {
+      title: "Appointment changes and client discharges",
+      body: [
+        "Appointment schedules may change due to client availability, clinician availability, public holidays, illness, emergencies or travel disruptions.",
+        "Please keep administration informed if multiple appointments are rescheduled, a client cancels regularly, a client wishes to discontinue services, you need scheduling support or a change may affect billing or funding."
+      ]
+    },
+    {
+      title: "Working together across disciplines",
+      body: [
+        "Refine includes physiotherapists, occupational therapists and remedial massage therapists. If you feel a client may benefit from another service within Refine Physio Mobile, notify administration.",
+        "Internal referrals can complement physiotherapy treatment and improve overall outcomes."
+      ],
+      image: "/onboarding-illustrations/diverse-physio-team.png"
+    }
+  ],
+  "leave-support": [
+    {
+      title: "Illness, leave and unexpected circumstances",
+      body: [
+        "Life happens. Illness, family emergencies, vehicle issues and unexpected circumstances can affect your ability to attend appointments.",
+        "If you are unable to attend a scheduled appointment, notify administration as soon as possible. The earlier we know, the more options we have to support the client and minimise disruption."
+      ],
+      image: "/onboarding-illustrations/home-neuro-rehab.png"
+    },
+    {
+      title: "If you are unwell",
+      body: [
+        "If you are sick or believe you may be contagious, please do not attend client appointments.",
+        "Many clients are older adults, immunocompromised individuals or people living with complex health conditions. Attending while unwell may place vulnerable clients at risk."
+      ],
+      bullets: ["Clients affected", "Appointment dates and times", "Urgent clinical concerns", "Expected return-to-work date if known"]
+    },
+    {
+      title: "Planned leave",
+      body: [
+        "We encourage clinicians to maintain a healthy work-life balance. If you are planning annual leave or an extended period away, please provide administration with as much notice as possible.",
+        "Where possible, we recommend providing at least four weeks' notice for planned leave."
+      ]
+    },
+    {
+      title: "Vehicle breakdowns and emergencies",
+      body: [
+        "If your vehicle breaks down or an emergency prevents you from attending appointments, notify administration immediately, provide details of affected appointments and work with administration to determine the best solution."
+      ],
+      image: "/onboarding-illustrations/04-mobile-physio-driving.png"
+    },
+    {
+      title: "Continuity of care and shared care",
+      body: [
+        "Clients receive services through Refine Physio Mobile. While clients may develop strong relationships with individual clinicians, our clients remain clients of Refine Physio Mobile.",
+        "This allows us to continue supporting clients during annual leave, illness, extended periods away, high caseload periods and geographic coverage requirements."
+      ]
+    },
+    {
+      title: "Handover expectations",
+      body: [
+        "If another clinician is covering your clients, make sure documentation is up to date, treatment goals are clearly documented, equipment recommendations are documented, outstanding actions are identified and clinical concerns are communicated.",
+        "Good documentation allows another clinician to step in confidently and provide seamless care."
+      ]
+    },
+    {
+      title: "You are never on your own",
+      body: [
+        "You are never expected to know everything or manage difficult situations alone. If you are unsure about clinical presentations, equipment recommendations, report writing, funding questions, scheduling concerns, client complaints or difficult conversations, please ask.",
+        "Seeking support is a sign of professionalism and commitment to providing the best possible care."
+      ],
+      image: "/onboarding-illustrations/06-team-celebration-diverse.png"
+    }
+  ],
+  documentation: [
+    {
+      title: "Why documentation matters",
+      body: [
+        "Documentation is much more than a compliance requirement. Strong documentation supports client care, clinical reasoning, funding approvals, communication with stakeholders, continuity of care and professional accountability.",
+        "For many referral partners, support coordinators and case managers, your documentation may be the only insight they have into the progress being made with a client."
+      ],
+      image: "/onboarding-illustrations/05-care-plan-tablet.png"
+    },
+    {
+      title: "Clinical documentation standards",
+      body: [
+        "Treatment notes should accurately reflect assessment findings, treatment provided, client response, progress towards goals, clinical reasoning and ongoing recommendations.",
+        "If a support coordinator, case manager or funding body read the note, they should clearly understand the value of the session and why ongoing physiotherapy is being provided."
+      ]
+    },
+    {
+      title: "Writing high quality treatment notes",
+      body: [
+        "Strong documentation does not mean writing lengthy notes. It means writing meaningful notes.",
+        "A good treatment note should answer: what did you do, why did you do it, how did the client respond and what is the plan moving forward."
+      ],
+      bullets: ["What did you do?", "Why did you do it?", "How did the client respond?", "What is the plan moving forward?"]
+    },
+    {
+      title: "Poor note versus strong note",
+      body: [
+        "Poor example: Exercises completed. Tolerated well.",
+        "Strong example: Completed lower limb strengthening, sit-to-stand training and dynamic balance exercises. Client demonstrated improved transfer ability and required less upper limb support compared to previous sessions. Tolerated session well with nil increase in pain. Continue progression of lower limb strengthening and balance activities to support independence and reduce falls risk."
+      ],
+      highlight: true
+    },
+    {
+      title: "Documentation timeframes",
+      body: [
+        "Treatment notes must be completed within 24 hours of every appointment. Where possible, complete notes on the same day.",
+        "Initial assessment reports and equipment trial reports must be completed and submitted within 2 business days of the assessment or trial."
+      ],
+      bullets: ["Treatment notes: within 24 hours", "Initial assessment reports: within 2 business days", "Equipment trial reports: within 2 business days"],
+      image: "/onboarding-illustrations/02-seated-exercise.png"
+    },
+    {
+      title: "Report approval process",
+      body: [
+        "The process is: assessment completed, report written by clinician, report submitted to administration, administration reviews report, administration sends report to relevant stakeholders, funding approval or feedback received, clinician updated.",
+        "This process ensures reports are distributed appropriately and communication with stakeholders remains consistent."
+      ]
+    },
+    {
+      title: "Equipment recommendations and report delays",
+      body: [
+        "Where equipment is being recommended, complete the assessment, trial equipment where appropriate, collect outcome measures, complete the report and submit to administration.",
+        "If you anticipate being unable to meet documentation timeframes, notify administration early, provide an expected completion date and communicate any urgent concerns."
+      ]
+    }
+  ],
+  clinical: [
+    {
+      title: "Delivering high quality physiotherapy",
+      body: [
+        "Our goal is to provide evidence-based, client-centred physiotherapy that helps individuals improve function, maximise independence and achieve meaningful outcomes.",
+        "Every client is unique. Treatment approaches may vary, but clinicians should focus on evidence-based practice, functional outcomes, goal-directed treatment, client-centred care, clear clinical reasoning and measurable progress."
+      ],
+      image: "/onboarding-illustrations/aged-care-group-exercise.png"
+    },
+    {
+      title: "Goal setting",
+      body: [
+        "Goals help guide treatment planning, measure progress, improve motivation, support funding requests and demonstrate clinical value.",
+        "Where possible, goals should be specific, meaningful, measurable and functional."
+      ],
+      bullets: ["Walk independently to the mailbox", "Improve confidence using stairs", "Reduce falls risk", "Improve transfer ability", "Return to community activities"]
+    },
+    {
+      title: "Falls management",
+      body: [
+        "Many clients present with balance deficits, reduced mobility and increased falls risk. Falls prevention should remain a key consideration during assessment and treatment.",
+        "Where appropriate, assess falls history, environmental risks, mobility and balance, implement prevention strategies, provide education and recommend equipment."
+      ],
+      image: "/onboarding-illustrations/wheelchair-disability-physio.png"
+    },
+    {
+      title: "If a fall occurs",
+      body: [
+        "Assess injury, pain, mobility and need for medical review. Document the circumstances of the fall, findings and actions taken. Notify administration as soon as possible."
+      ]
+    },
+    {
+      title: "Clinical escalation",
+      body: [
+        "Notify administration immediately regarding falls with injury, hospital admissions, significant deterioration, safeguarding concerns, suspected abuse, aggressive behaviour, mental health concerns, emergencies or concerns regarding client safety."
+      ],
+      highlight: true
+    },
+    {
+      title: "Equipment recommendations and process",
+      body: [
+        "Physiotherapists play an important role in identifying equipment needs that support safety, independence and function. Recommendations may include walking sticks, four wheel walkers, rollators, electric beds, bed rails, recliners, pressure cushions and transfer aids.",
+        "When equipment is being considered, follow a structured process: assessment, trial, clinical justification, report, administration review, stakeholder communication, approval process, delivery and follow up."
+      ],
+      image: "/onboarding-illustrations/hydrotherapy-session.png"
+    },
+    {
+      title: "Clinical reasoning and value",
+      body: [
+        "Strong physiotherapy involves understanding why the client is receiving physiotherapy, what limitations are affecting daily life, what barriers are preventing goals and what interventions are likely to create meaningful improvements.",
+        "Every appointment should have a purpose. Not every session needs to result in major change, but every session should contribute to the client's overall goals and treatment plan."
+      ]
+    }
+  ],
+  resources: [
+    {
+      title: "Supporting you to deliver great care",
+      body: [
+        "Refine wants clinicians to have the tools, resources and support required to provide exceptional physiotherapy services.",
+        "While contractors manage their own vehicle, travel and registrations, Refine provides support through systems, resources and approved consumables where required."
+      ],
+      image: "/onboarding-illustrations/paediatric-physio-play.png"
+    },
+    {
+      title: "Consumables and clinical supplies",
+      body: [
+        "Refine may supply standard clinical consumables required to provide physiotherapy services. Availability may vary depending on client needs and business requirements."
+      ],
+      bullets: ["Physiocrem", "Massage oil", "Resistance bands", "Therabands", "Printed exercise programs", "Clinical education resources"]
+    },
+    {
+      title: "Running low or ordering consumables",
+      body: [
+        "If you are running low on consumables, let administration know early. We would much rather order supplies before you run out than have you without the resources you need.",
+        "To order, contact administration, advise what items are required and provide approximate quantities where known."
+      ]
+    },
+    {
+      title: "Collecting consumables and Bowen Hills access",
+      body: [
+        "Consumables can be collected by arranging a collection time with administration or collecting directly from the Bowen Hills clinic.",
+        "The Bowen Hills clinic acts as a central hub for administration, equipment, supplies and team support."
+      ],
+      image: "/onboarding-illustrations/04-mobile-physio-driving.png"
+    },
+    {
+      title: "Refine Mobile and Cliniko",
+      body: [
+        "Refine Mobile has been developed to simplify appointment management, patient information, treatment notes, report generation, scheduling, communication and clinical workflows.",
+        "Cliniko remains an important part of operations for reviewing appointments, referral information, client records, reports and scheduling where required.",
+        "The Refine Mobile quick start PDF is available in this handbook and includes screenshots for the main practitioner workflows."
+      ],
+      bullets: ["Book appointments", "Rebook patients", "Use maps and phone links", "Send late notices to admin", "Complete notes and reports", "Ask admin for approval", "Message admin and read updates"],
+      link: ["/practitioner-quick-start-guide.pdf", "Open software guide PDF"]
+    },
+    {
+      title: "Resources, templates and report support",
+      body: [
+        "Resources available may include administrative support, clinical mentoring, documentation support, equipment guidance, software support, report writing support, internal referrals and team collaboration.",
+        "Refine provides clinical templates such as initial assessment templates, progress note templates, equipment trial report templates, review report templates and documentation examples."
+      ],
+      image: "/onboarding-illustrations/05-care-plan-tablet.png"
+    },
+    {
+      title: "Technology and continuous improvement",
+      body: [
+        "Our systems are designed to improve efficiency and reduce administrative burden. As the business grows, systems will continue to evolve.",
+        "If you identify better ways of working, process improvements, software improvements, clinical improvements or client experience improvements, please share your ideas."
+      ]
+    }
+  ],
+  payments: [
+    {
+      title: "Contractor payments",
+      body: [
+        "Payments are processed on a fortnightly basis. At the end of each pay period, administration reviews completed billable appointments and approved reports, prepares a contractor statement and sends it to you.",
+        "You review the statement and submit a matching tax invoice. Payment is then processed."
+      ],
+      image: "/onboarding-illustrations/05-care-plan-tablet.png"
+    },
+    {
+      title: "Billable services",
+      body: ["Generally, billable services may include initial assessments, treatment sessions, approved reports, approved equipment trial reports and other approved services where applicable."]
+    },
+    {
+      title: "Travel",
+      body: [
+        "At the time of publication, Refine Physio Mobile does not bill travel.",
+        "Contractors are responsible for fuel costs, vehicle expenses and vehicle maintenance. We encourage clinicians to consider travel efficiency and group appointments geographically where possible."
+      ],
+      image: "/onboarding-illustrations/04-mobile-physio-driving.png"
+    },
+    {
+      title: "Non-billable appointments",
+      body: [
+        "Occasionally appointments may not be billable due to funding not approved, service agreement not signed, referral withdrawn, funding exhausted or an appointment completed before approval was obtained.",
+        "If an appointment is identified as non-billable, administration will investigate the circumstances and discuss the matter with the clinician where required."
+      ]
+    },
+    {
+      title: "Funding approvals and communication",
+      body: [
+        "Administration manages service agreements, funding approvals and communication with support coordinators, case managers and funding bodies.",
+        "If you are unsure whether services have been approved, funding is available, a report is billable or an appointment can proceed, contact administration before proceeding."
+      ]
+    }
+  ],
+  conduct: [
+    {
+      title: "Protecting relationships",
+      body: [
+        "Refine invests significant time, effort and resources into building relationships with clients, families, support coordinators, aged care providers, case managers and referral partners.",
+        "As a contractor, you may be introduced to these relationships through the business. We ask that all contractors respect these relationships and act in good faith."
+      ],
+      image: "/onboarding-illustrations/05-case-manager-collaboration.png"
+    },
+    {
+      title: "Our clients",
+      body: [
+        "Clients receive services through Refine Physio Mobile. While clients may develop strong relationships with individual clinicians, our clients remain clients of Refine Physio Mobile.",
+        "This allows us to maintain continuity of care, support clients during leave, provide multidisciplinary services and continue services if circumstances change."
+      ]
+    },
+    {
+      title: "Non-solicitation",
+      body: [
+        "During and after your engagement with Refine, you must not encourage a Refine client to cease services, request that a client transfer services to you personally or another provider, solicit referrals from Refine referral partners for your own business interests or use information obtained through Refine for personal commercial gain."
+      ],
+      highlight: true
+    },
+    {
+      title: "Existing clients and conflict of interest",
+      body: [
+        "This section does not apply to genuine pre-existing clients who were already receiving services from you before joining Refine Physio Mobile.",
+        "Refine does not seek to restrict clinicians from working elsewhere. However, clinicians must not use Refine clients, referral partners or confidential business information to build competing services."
+      ]
+    },
+    {
+      title: "Confidentiality and personal contact details",
+      body: [
+        "Confidential information relating to clients, referral partners, funding arrangements, pricing, business operations and internal systems must remain confidential during and after your engagement.",
+        "Clinicians should not provide personal mobile numbers, personal email addresses or personal social media accounts to clients."
+      ]
+    },
+    {
+      title: "Professional boundaries, social media and privacy",
+      body: [
+        "Maintain professional boundaries by avoiding involvement in family disputes, personal financial matters, significant gifts, services outside approved arrangements and dual relationships where possible.",
+        "Do not share client information on social media, discuss identifiable information publicly, upload client information to personal cloud storage or share photos and videos without consent."
+      ],
+      image: "/onboarding-illustrations/wheelchair-disability-physio.png"
+    },
+    {
+      title: "Complaints and protecting the Refine brand",
+      body: [
+        "If a client complaint is received, remain professional, listen respectfully, avoid becoming defensive and notify administration as soon as possible.",
+        "Every interaction contributes to the reputation of Refine Physio Mobile. Protecting relationships protects the opportunities that support our clients, referral partners and team."
+      ]
+    }
+  ],
+  growth: [
+    {
+      title: "Helping Refine grow",
+      body: [
+        "Many referrals come through word-of-mouth recommendations from clients, families, support coordinators, aged care providers and healthcare professionals.",
+        "As clinicians, you are often the face of the business. The way we communicate, document, achieve outcomes and build relationships all contribute to Refine's reputation."
+      ],
+      image: "/onboarding-illustrations/06-team-celebration-diverse.png"
+    },
+    {
+      title: "Referral opportunities",
+      body: [
+        "If you encounter situations where another person may benefit from Refine services, let administration know. This may include family members, friends of existing clients, other residents within facilities, support coordinators or home care providers seeking allied health support.",
+        "We never expect clinicians to sell services. Our focus should remain on helping people."
+      ]
+    },
+    {
+      title: "Professional development",
+      body: [
+        "We encourage continuous learning and professional growth through continuing professional development, clinical discussion, mentoring, peer support, skill development and knowledge sharing.",
+        "No matter how experienced you are, there is always something new to learn."
+      ],
+      image: "/onboarding-illustrations/diverse-physio-team.png"
+    },
+    {
+      title: "Feedback and continuous improvement",
+      body: [
+        "Many of the systems used within Refine have been developed through feedback from clinicians and team members.",
+        "If you identify opportunities to improve client experience, documentation, software systems, scheduling workflows, communication or clinical resources, please share your ideas."
+      ]
+    },
+    {
+      title: "Building something bigger",
+      body: [
+        "Refine Physio Mobile is still growing. Every clinician who joins us has an opportunity to help shape the future of the business.",
+        "Our goal is to build a business that clients trust, families recommend, referral partners value and clinicians enjoy being part of."
+      ]
+    },
+    {
+      title: "Why we do what we do",
+      body: [
+        "Every appointment is more than a treatment session. For some clients, we may be the only healthcare professional they see regularly.",
+        "We have the opportunity to improve confidence, independence, mobility, quality of life and help people achieve meaningful goals. The work we do matters."
+      ],
+      image: "/onboarding-illustrations/aged-care-group-exercise.png"
+    },
+    {
+      title: "Welcome to the team",
+      body: [
+        "Thank you for choosing to be part of Refine Physio Mobile. We are excited to have you on the team and look forward to working with you.",
+        "Together, we can continue making a meaningful difference in the lives of the people we support every day."
+      ],
+      bullets: ["Katie Hsiao", "Director | Physiotherapist"],
+      highlight: true
+    }
+  ]
+};
 
 const physioOutcomeMeasures = [
   {
@@ -354,6 +1131,16 @@ function renderLogin() {
 function renderLoginForm() {
   return `
     <form class="login-form" id="login-form">
+      <div class="login-destination" role="group" aria-label="Choose where to open after sign in">
+        <button type="button" class="login-destination-card ${state.loginDestination === "schedule" ? "active" : ""}" data-action="login-destination" data-destination="schedule" aria-pressed="${state.loginDestination === "schedule" ? "true" : "false"}">
+          <strong>Open schedule</strong>
+          <span>Calendar, appointments, notes, reports and messages.</span>
+        </button>
+        <button type="button" class="login-destination-card ${state.loginDestination === "handbook" ? "active" : ""}" data-action="login-destination" data-destination="handbook" aria-pressed="${state.loginDestination === "handbook" ? "true" : "false"}">
+          <strong>Open handbook</strong>
+          <span>Contractor onboarding, policies, workflows and guides.</span>
+        </button>
+      </div>
       <label>Email
         <input name="email" type="email" autocomplete="username" required>
       </label>
@@ -394,6 +1181,8 @@ function render() {
   const isOwner = canUseOwnerWorkspace();
   const practitionerView = ownerViewingPractitioner();
   const practitioner = currentCalendarPractitioner();
+  const handbookView = state.tab === "handbook";
+  const handbookProgress = onboardingProgress();
 
   app.innerHTML = `
     <div class="app-shell">
@@ -424,16 +1213,16 @@ function render() {
       <main class="page">
         <section class="identity-band">
           <div>
-            <h2>${practitionerView ? `Practitioner view: ${escapeHtml(practitioner?.name || "Practitioner")}` : isAdmin ? "Mobile operations dashboard" : "Refine Physio Mobile Software"}</h2>
-            <p>${practitionerView ? "Today's jobs, client records, notes, reports, and messages." : isAdmin ? "Approvals, reports, referrals, users, and Cliniko sync in one place." : "Welcome! We're so happy to have you on our team :)"}</p>
+            <h2>${handbookView ? "Contractor onboarding handbook" : practitionerView ? `Practitioner view: ${escapeHtml(practitioner?.name || "Practitioner")}` : isAdmin ? "Mobile operations dashboard" : "Refine Physio Mobile Software"}</h2>
+            <p>${handbookView ? "Learn the Refine way, mark sections complete, and keep key workflows close at hand." : practitionerView ? "Today's jobs, client records, notes, reports, and messages." : isAdmin ? "Approvals, reports, referrals, users, and Cliniko sync in one place." : "Welcome! We're so happy to have you on our team :)"}</p>
           </div>
           <div class="status-strip">
-            ${statusPill(data.clinikoSync.status === "connected" ? "Cliniko connected" : "Cliniko pending", data.clinikoSync.status === "connected" ? "blue" : "gold")}
+            ${handbookView ? statusPill(`${handbookProgress.completed}/${handbookProgress.total} complete`, handbookProgress.completed === handbookProgress.total ? "blue" : "gold") : statusPill(data.clinikoSync.status === "connected" ? "Cliniko connected" : "Cliniko pending", data.clinikoSync.status === "connected" ? "blue" : "gold")}
             ${statusPill(isOwner ? "Owner access" : isAdmin ? "Admin access" : "Assigned clients only")}
           </div>
         </section>
 
-        ${renderKpis()}
+        ${handbookView ? "" : renderKpis()}
         ${renderTabs()}
         <section class="view" id="view">${renderView()}</section>
         ${renderAppointmentDetailModal()}
@@ -724,6 +1513,45 @@ function adjacentTabId(step) {
   return ids[nextIndex] || state.tab;
 }
 
+function onboardingCompletedIds() {
+  try {
+    const ids = JSON.parse(localStorage.getItem("refine-onboarding-completed") || "[]");
+    return new Set(Array.isArray(ids) ? ids : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setOnboardingCompletedIds(ids) {
+  localStorage.setItem("refine-onboarding-completed", JSON.stringify([...ids]));
+}
+
+function onboardingProgress() {
+  const completedIds = onboardingCompletedIds();
+  const total = onboardingSections.length;
+  const completed = onboardingSections.filter((section) => completedIds.has(section.id)).length;
+  return {
+    total,
+    completed,
+    percent: total ? Math.round((completed / total) * 100) : 0
+  };
+}
+
+function currentOnboardingSection() {
+  return onboardingSections.find((section) => section.id === state.onboardingSectionId) || onboardingSections[0];
+}
+
+function setOnboardingSection(sectionId) {
+  if (!onboardingSections.some((section) => section.id === sectionId)) return;
+  state.onboardingSectionId = sectionId;
+  localStorage.setItem("refine-onboarding-section", sectionId);
+}
+
+function nextOnboardingSectionId() {
+  const index = Math.max(0, onboardingSections.findIndex((section) => section.id === currentOnboardingSection().id));
+  return onboardingSections[(index + 1) % onboardingSections.length]?.id || onboardingSections[0]?.id || "";
+}
+
 function scrollTabList(step = 1) {
   const tabs = document.querySelector("#section-tabs");
   if (!tabs) return;
@@ -752,6 +1580,7 @@ function renderView() {
   const role = state.data.currentUser.role;
   const isOperations = role === "admin" || role === "receptionist";
   const practitionerView = role === "contractor" || ownerViewingPractitioner();
+  if (state.tab === "handbook") return renderOnboardingHub();
   if (practitionerView) {
     if (state.tab === "clients") return renderClients();
     if (state.tab === "rebook") return renderRebook();
@@ -784,6 +1613,293 @@ function renderView() {
   }
 
   return renderContractorToday();
+}
+
+function onboardingArticleBlocks(section) {
+  return onboardingArticleContent[section.id] || section.cards.map(([title, body]) => ({ title, body: [body] }));
+}
+
+function onboardingArticleBlockId(sectionId, index) {
+  return `handbook-${sectionId}-${index + 1}`;
+}
+
+function titleCaseHandbookLabel(value) {
+  const keepUpper = new Set(["ABN", "AHPRA", "CHSP", "DVA", "NDIS", "NIISQ", "OT", "OTs", "PDF", "RMT"]);
+  return String(value || "")
+    .split(/(\s+)/)
+    .map((token) => {
+      if (!token.trim()) return token;
+      return token
+        .split(/([-–—/])/)
+        .map((part) => {
+          if (!part || /^[-–—/]$/.test(part)) return part;
+          if (keepUpper.has(part)) return part;
+          return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join("");
+    })
+    .join("");
+}
+
+function onboardingSectionPalette(sectionId) {
+  return {
+    welcome: ["#0f8fbc", "#eef9fc"],
+    working: ["#6374d8", "#f3f4ff"],
+    referrals: ["#0f8f84", "#edf9f7"],
+    "leave-support": ["#b96f33", "#fff5ec"],
+    documentation: ["#0f6fb8", "#edf7ff"],
+    clinical: ["#509433", "#f1faed"],
+    resources: ["#c17b1d", "#fff7e8"],
+    payments: ["#795cc9", "#f5f1ff"],
+    conduct: ["#c45d7b", "#fff1f5"],
+    growth: ["#087ea4", "#edf9fc"]
+  }[sectionId] || ["#0f8fbc", "#eef9fc"];
+}
+
+function onboardingSectionVisuals(sectionId) {
+  const shared = {
+    welcome: [
+      ["/onboarding-illustrations/katie-waving.png", "Welcome from Katie"],
+      ["/onboarding-illustrations/diverse-physio-team.png", "Meet the team"],
+      ["/onboarding-illustrations/06-team-celebration-diverse.png", "Refine culture"]
+    ],
+    working: [
+      ["/onboarding-illustrations/01-team-bonding-diverse.png", "Team communication"],
+      ["/onboarding-illustrations/04-mobile-physio-driving.png", "Mobile work"],
+      ["/onboarding-illustrations/diverse-physio-team.png", "Professional team"]
+    ],
+    referrals: [
+      ["/onboarding-illustrations/paediatric-family-support.png", "Family support"],
+      ["/onboarding-illustrations/05-case-manager-collaboration.png", "Referral partners"],
+      ["/onboarding-illustrations/wheelchair-disability-physio.png", "Client allocation"]
+    ],
+    "leave-support": [
+      ["/onboarding-illustrations/home-neuro-rehab.png", "Continuity of care"],
+      ["/onboarding-illustrations/06-team-celebration-diverse.png", "Team support"],
+      ["/onboarding-illustrations/04-mobile-physio-driving.png", "Unexpected changes"]
+    ],
+    documentation: [
+      ["/onboarding-illustrations/05-care-plan-tablet.png", "Documentation"],
+      ["/onboarding-illustrations/aged-care-group-exercise.png", "Treatment notes"],
+      ["/onboarding-illustrations/05-case-manager-collaboration.png", "Reports for stakeholders"]
+    ],
+    clinical: [
+      ["/onboarding-illustrations/hydrotherapy-session.png", "Hydrotherapy"],
+      ["/onboarding-illustrations/paediatric-physio-play.png", "Paediatrics"],
+      ["/onboarding-illustrations/wheelchair-disability-physio.png", "Disability support"]
+    ],
+    resources: [
+      ["/onboarding-illustrations/paediatric-physio-play.png", "Clinical resources"],
+      ["/onboarding-illustrations/04-mobile-physio-driving.png", "Bowen Hills pickup"],
+      ["/onboarding-illustrations/05-care-plan-tablet.png", "Software guide"]
+    ],
+    payments: [
+      ["/onboarding-illustrations/05-care-plan-tablet.png", "Statements"],
+      ["/onboarding-illustrations/04-mobile-physio-driving.png", "Travel planning"],
+      ["/onboarding-illustrations/01-team-bonding-diverse.png", "Admin support"]
+    ],
+    conduct: [
+      ["/onboarding-illustrations/05-case-manager-collaboration.png", "Professional relationships"],
+      ["/onboarding-illustrations/wheelchair-disability-physio.png", "Client boundaries"],
+      ["/onboarding-illustrations/diverse-physio-team.png", "Representing Refine"]
+    ],
+    growth: [
+      ["/onboarding-illustrations/06-team-celebration-diverse.png", "Team culture"],
+      ["/onboarding-illustrations/diverse-physio-team.png", "Professional growth"],
+      ["/onboarding-illustrations/aged-care-group-exercise.png", "Meaningful care"]
+    ]
+  };
+  return shared[sectionId] || shared.welcome;
+}
+
+function renderOnboardingArticle(section) {
+  const blocks = onboardingArticleBlocks(section);
+  return `
+    <section class="onboarding-reader">
+      <aside class="onboarding-topic-card" aria-label="Topics in this section">
+        <span class="onboarding-eyebrow">In this section</span>
+        <div class="onboarding-topic-list">
+          ${blocks.map((block, index) => `
+            <a href="#${escapeHtml(onboardingArticleBlockId(section.id, index))}">
+              <span>${String(index + 1).padStart(2, "0")}</span>
+              <strong>${escapeHtml(titleCaseHandbookLabel(block.title))}</strong>
+            </a>
+          `).join("")}
+        </div>
+      </aside>
+      <div class="onboarding-article-flow">
+        ${blocks.map((block, index) => `
+          <section id="${escapeHtml(onboardingArticleBlockId(section.id, index))}" class="onboarding-article-block ${block.image ? "has-image" : ""} ${block.highlight ? "is-highlight" : ""}">
+            <div class="onboarding-article-copy">
+              <span class="onboarding-block-number">${String(index + 1).padStart(2, "0")}</span>
+              <h4>${escapeHtml(block.title)}</h4>
+              ${(block.body || []).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+              ${block.bullets?.length ? `
+                <ul>
+                  ${block.bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+                </ul>
+              ` : ""}
+              ${block.link?.length ? `<a class="button onboarding-block-link" href="${escapeHtml(block.link[0])}" target="_blank" rel="noreferrer">${escapeHtml(block.link[1])}</a>` : ""}
+              ${block.signature?.length ? `
+                <div class="onboarding-signature">
+                  ${block.signature.map((line, lineIndex) => `<span class="${lineIndex === 1 ? "signature-name" : ""}">${escapeHtml(line)}</span>`).join("")}
+                </div>
+              ` : ""}
+              ${block.quote ? `<blockquote>${escapeHtml(block.quote)}</blockquote>` : ""}
+            </div>
+            ${block.image ? `<img src="${escapeHtml(block.image)}" alt="">` : ""}
+          </section>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderOnboardingResourcePanel() {
+  return `
+    <section class="onboarding-resource-panel">
+      <div>
+        <span class="onboarding-eyebrow">Practical software guide</span>
+        <h3>Refine Mobile quick start PDF</h3>
+        <p>Step-by-step screenshots for booking appointments, rebooking, maps, running late, notes, reports, approvals, messages, updates, client files and troubleshooting.</p>
+      </div>
+      <a class="button" href="/practitioner-quick-start-guide.pdf" target="_blank" rel="noreferrer">Open PDF guide</a>
+    </section>
+  `;
+}
+
+function renderOnboardingHub() {
+  const activeSection = currentOnboardingSection();
+  const progress = onboardingProgress();
+  const completed = onboardingCompletedIds();
+  const blocks = onboardingArticleBlocks(activeSection);
+  const [sectionAccent, sectionSoft] = onboardingSectionPalette(activeSection.id);
+  const nextSection = onboardingSections.find((section) => !completed.has(section.id)) || activeSection;
+  return `
+    <section class="onboarding-hub">
+      <div class="onboarding-hero">
+        <div class="onboarding-hero-copy">
+          <span class="onboarding-eyebrow">Refine Contractor Handbook</span>
+          <h3>Everything you need, in one supportive place.</h3>
+          <p>A friendly, visual guide for contractors: read the essentials, open each topic, check your confidence points, and come back whenever you need a refresher.</p>
+          <div class="onboarding-hero-actions">
+            <button type="button" data-action="onboarding-section" data-section-id="${escapeHtml(nextSection.id)}">
+              ${progress.completed ? "Continue onboarding" : "Start onboarding"}
+            </button>
+            <a class="button secondary" href="/practitioner-quick-start-guide.pdf" target="_blank" rel="noreferrer">
+              Open PDF guide
+            </a>
+          </div>
+        </div>
+        <div class="onboarding-hero-media">
+          <img src="/onboarding-illustrations/diverse-physio-team.png" alt="Diverse Refine physiotherapy team illustration">
+          <div class="onboarding-progress-card">
+            <div>
+              <strong>${progress.completed}/${progress.total}</strong>
+              <span>sections complete</span>
+            </div>
+            <div class="onboarding-progress-track" aria-label="${progress.percent}% complete">
+              <span style="width:${progress.percent}%"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="onboarding-team-intro">
+        <section class="onboarding-katie-card">
+          <img src="/onboarding-illustrations/katie-waving.png" alt="Katie waving hello">
+          <div>
+            <span class="onboarding-eyebrow">Welcome from Katie</span>
+            <h3>Hi, welcome to Refine.</h3>
+            <p>We are genuinely excited to have you on the team. This portal is here to make the important things easy to find, easy to understand, and easy to come back to.</p>
+            <strong>Katie Hsiao<br><span>Director | Physiotherapist</span></strong>
+          </div>
+        </section>
+
+        <section class="onboarding-team-card">
+          <img src="/onboarding-illustrations/diverse-physio-team.png" alt="Diverse Refine physiotherapists">
+          <div>
+            <span class="onboarding-eyebrow">Meet the team</span>
+            <h3>Different clinicians, same Refine standard.</h3>
+            <p>A diverse team supporting clients across home visits, community care, paediatrics, aged care and disability services.</p>
+          </div>
+        </section>
+
+        <section class="onboarding-team-card">
+          <img src="/onboarding-illustrations/hydrotherapy-session.png" alt="Physiotherapist supporting a hydrotherapy session">
+          <div>
+            <span class="onboarding-eyebrow">Clinical variety</span>
+            <h3>Mobile care looks different every day.</h3>
+            <p>From hydrotherapy to home rehab, every clinician has the support and systems to deliver great care.</p>
+          </div>
+        </section>
+
+        <section class="onboarding-team-card">
+          <img src="/onboarding-illustrations/paediatric-family-support.png" alt="Physiotherapist supporting a family and child">
+          <div>
+            <span class="onboarding-eyebrow">Client centred</span>
+            <h3>Support for every stage of life.</h3>
+            <p>The handbook reflects the full team and the people we support, not just one clinician or one setting.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="onboarding-layout">
+        <aside class="onboarding-sidebar" aria-label="Handbook sections">
+          <div class="onboarding-sidebar-heading">
+            <strong>Onboarding</strong>
+            <span>${progress.percent}% complete</span>
+          </div>
+          <div class="onboarding-section-list">
+            ${onboardingSections.map((section) => `
+              <button type="button" class="${section.id === activeSection.id ? "active" : ""}" data-action="onboarding-section" data-section-id="${escapeHtml(section.id)}">
+                <span>${escapeHtml(section.number)}</span>
+                <strong>${escapeHtml(section.title)}</strong>
+                ${completed.has(section.id) ? "<em>Done</em>" : "<em>Open</em>"}
+              </button>
+            `).join("")}
+          </div>
+        </aside>
+
+        <article class="onboarding-content" style="--section-accent:${escapeHtml(sectionAccent)};--section-soft:${escapeHtml(sectionSoft)}">
+          <div class="onboarding-content-header">
+            <div>
+              <span class="onboarding-eyebrow">${escapeHtml(activeSection.eyebrow)}</span>
+              <h3>${escapeHtml(activeSection.title)}</h3>
+              <p>${escapeHtml(activeSection.summary)}</p>
+            </div>
+            <img src="${escapeHtml(activeSection.image)}" alt="">
+          </div>
+
+          ${renderOnboardingArticle(activeSection)}
+
+          <section class="onboarding-checklist-card onboarding-checkout-card">
+            <div class="section-heading">
+              <h3>Before you mark this section complete</h3>
+              <span>${completed.has(activeSection.id) ? "Completed" : "Read then mark complete"}</span>
+            </div>
+            <ul class="onboarding-checklist onboarding-checkout-list">
+              ${activeSection.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+            </ul>
+            <div class="onboarding-actions">
+              <button type="button" data-action="onboarding-complete" data-section-id="${escapeHtml(activeSection.id)}" class="${completed.has(activeSection.id) ? "secondary" : ""}">
+                ${completed.has(activeSection.id) ? "Mark as not complete" : "Mark section complete"}
+              </button>
+              <button type="button" class="secondary" data-action="onboarding-next">
+                Next section
+              </button>
+            </div>
+          </section>
+
+          <section class="onboarding-note">
+            <strong>Need help?</strong>
+            <span>If anything is unclear, message Katie or admin and we're always here to support you.</span>
+          </section>
+
+        </article>
+      </div>
+    </section>
+  `;
 }
 
 function renderAdminOverview() {
@@ -4583,6 +5699,13 @@ function goToBrandHome() {
 function bindLoginEvents() {
   document.querySelector("#login-form")?.addEventListener("submit", submitLogin);
   document.querySelector("#forgot-password-form")?.addEventListener("submit", submitForgotPassword);
+  document.querySelectorAll("[data-action='login-destination']").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.loginDestination = button.dataset.destination || "schedule";
+      localStorage.setItem("refine-login-destination", state.loginDestination);
+      renderLogin();
+    });
+  });
   document.querySelector("[data-action='forgot-password']")?.addEventListener("click", () => {
     state.forgotMode = true;
     state.loginError = "";
@@ -4600,6 +5723,7 @@ function bindLoginEvents() {
 async function submitLogin(event) {
   event.preventDefault();
   const payload = formPayload(event.currentTarget);
+  delete payload.loginDestination;
   state.loginLoading = true;
   state.loginError = "";
   state.forgotMessage = "";
@@ -4607,7 +5731,7 @@ async function submitLogin(event) {
   try {
     await fetchJson("/api/auth/login", { method: "POST", body: payload });
     state.loginLoading = false;
-    state.tab = "";
+    state.tab = state.loginDestination === "handbook" ? "handbook" : "";
     state.tabHistory = [];
     await loadData();
     void syncClinikoForeground({ reason: "login", force: true, quiet: true });
@@ -4688,6 +5812,27 @@ function goToAppointmentOnCalendar(appointmentId, startsAtFallback = "") {
 
 function bindViewEvents() {
   app.onclick = handleViewClick;
+
+  document.querySelectorAll("[data-action='onboarding-section']").forEach((button) => {
+    button.addEventListener("click", () => {
+      setOnboardingSection(button.dataset.sectionId || "");
+      render();
+    });
+  });
+
+  document.querySelector("[data-action='onboarding-complete']")?.addEventListener("click", (event) => {
+    const sectionId = event.currentTarget.dataset.sectionId || currentOnboardingSection().id;
+    const completed = onboardingCompletedIds();
+    if (completed.has(sectionId)) completed.delete(sectionId);
+    else completed.add(sectionId);
+    setOnboardingCompletedIds(completed);
+    render();
+  });
+
+  document.querySelector("[data-action='onboarding-next']")?.addEventListener("click", () => {
+    setOnboardingSection(nextOnboardingSectionId());
+    render();
+  });
 
   document.querySelector("#user-create-form")?.addEventListener("submit", submitCreateUser);
   document.querySelectorAll(".user-edit-form").forEach((form) => {
