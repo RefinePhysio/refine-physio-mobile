@@ -4417,7 +4417,7 @@ label {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: 26px minmax(0, 1fr) 26px;
+  grid-template-columns: 26px minmax(7rem, 1fr) 26px;
   font-weight: 800;
   margin-bottom: 8px;
   text-align: center;
@@ -4428,10 +4428,15 @@ label {
   border: 1px solid #c7c7c7;
   border-radius: 4px;
   color: #333;
+  display: grid;
   font-weight: 900;
   height: 26px;
+  justify-items: center;
   min-height: 26px;
+  min-width: 26px;
   padding: 0;
+  place-items: center;
+  width: 26px;
 }
 
 .mini-month-title button:hover {
@@ -4446,6 +4451,8 @@ label {
 
 .mini-month-spacer {
   display: block;
+  height: 26px;
+  width: 26px;
 }
 
 .mini-weekdays,
@@ -8988,6 +8995,7 @@ h3,
   }
 
   .calendar-date-nav {
+    align-items: stretch;
     display: grid;
     gap: 0;
     grid-template-columns: 38px minmax(0, 1fr) 38px;
@@ -9017,17 +9025,18 @@ h3,
     border-color: #c1d1dc;
     border-radius: 0;
     color: #273d4c;
+    display: grid;
     font-size: 1.28rem;
+    line-height: 1;
     min-height: 42px;
+    min-width: 0;
     padding: 4px;
+    place-items: center;
+    width: 100%;
   }
 
-  .calendar-date-nav button:first-child {
+  .calendar-date-nav button[data-action="calendar-shift"][data-direction="-1"] {
     border-radius: 8px 0 0 8px;
-  }
-
-  .calendar-date-nav button:nth-of-type(2) {
-    border-radius: 0 8px 8px 0;
   }
 
   .calendar-date-nav button.calendar-range-label {
@@ -9039,7 +9048,9 @@ h3,
     font-size: 0.98rem;
     font-weight: 850;
     line-height: 1.15;
+    overflow: visible;
     text-align: center;
+    white-space: normal;
   }
 
   .calendar-date-nav button[data-action="calendar-shift"][data-direction="1"] {
@@ -9062,12 +9073,27 @@ h3,
   }
 
   .mobile-calendar-picker .mini-month-title {
+    gap: 8px;
+    grid-template-columns: 44px minmax(10rem, 1fr) 44px;
     margin-bottom: 10px;
   }
 
   .mobile-calendar-picker .mini-month-title button {
-    height: 34px;
-    min-height: 34px;
+    border-radius: 10px;
+    color: #0c4259;
+    font-size: 1.35rem;
+    height: 40px;
+    min-height: 40px;
+    min-width: 40px;
+    width: 40px;
+  }
+
+  .mobile-calendar-picker .mini-month-title strong {
+    color: #0c4259;
+    font-size: 1rem;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .mobile-calendar-picker .mini-weekdays span {
