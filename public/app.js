@@ -100,7 +100,6 @@ const receptionistTabs = [
 
 const contractorTabs = [
   ["today", "Today"],
-  ["rebook", "Rebook"],
   ["clients", "Clients"],
   ["requests", "Approvals"],
   ["updates", "Updates"],
@@ -7921,7 +7920,7 @@ function notificationsForPractitionerWorkspace() {
 }
 
 function hiddenTabs() {
-  return ["notes", "reports", "notesDue", "reportsDue"];
+  return ["rebook", "notes", "reports", "notesDue", "reportsDue"];
 }
 
 function filterItems(items) {
