@@ -2763,12 +2763,14 @@ function renderPractitionerCalendar(appointments) {
                   && unavailableBlockStartSlot(block) === slot
                 );
                 const unavailableHere = slotHasUnavailableConflict(day.key, slot, 15);
+                const startsWithBlockingUnavailable = slotUnavailableBlocks.some(unavailableBlockBlocksBooking);
+                const canBookSlot = !startsWithBlockingUnavailable && !unavailableHere;
                 return `
                   <div class="${calendarCellClass(slot, practitioner, day.key)} ${day.isToday ? "is-today" : ""}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
                     ${slotAppointments.length
                       ? slotAppointments.map(renderCalendarEvent).join("")
                       : slotUnavailableBlocks.length
-                      ? slotUnavailableBlocks.map(renderUnavailableBlock).join("")
+                      ? `${slotUnavailableBlocks.map(renderUnavailableBlock).join("")}${canBookSlot ? renderCalendarEmptySlot(day, slot, practitioner) : ""}`
                       : unavailableHere
                       ? `<span class="calendar-unavailable-fill" aria-hidden="true"></span>`
                       : renderCalendarEmptySlot(day, slot, practitioner)}
@@ -2789,7 +2791,7 @@ function renderUnavailableBlock(block) {
   return `
     <button
       type="button"
-      class="calendar-unavailable-block"
+      class="calendar-unavailable-block ${readOnly ? "is-read-only" : ""}"
       data-block-kind="${escapeHtml(block.kind || "unavailable")}"
       style="--slot-span: ${unavailableBlockSlotSpan(block)}"
       draggable="${readOnly ? "false" : "true"}"
@@ -3073,12 +3075,13 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
     unavailableBlockDayKey(block) === day.key
     && unavailableBlockStartSlot(block) === slot
   );
+  const startsWithBlockingUnavailable = slotUnavailableBlocks.some(unavailableBlockBlocksBooking);
 
   if (slotAppointments.length) {
     return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">${slotAppointments.map(renderCalendarEvent).join("")}</div>`;
   }
 
-  if (slotUnavailableBlocks.length) {
+  if (slotUnavailableBlocks.length && startsWithBlockingUnavailable) {
     return `<div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">${slotUnavailableBlocks.map(renderUnavailableBlock).join("")}</div>`;
   }
 
@@ -3101,6 +3104,7 @@ function renderRebookSlotCell(day, slot, appointments, client, practitioner = cu
   const startLocal = localDateTimeFromDaySlot(day.key, slot);
   return `
     <div class="${cellClass}" data-calendar-day="${day.key}" data-calendar-slot="${slot}">
+      ${slotUnavailableBlocks.map(renderUnavailableBlock).join("")}
       <button
         type="button"
         class="calendar-gap"
@@ -8528,6 +8532,7 @@ function slotHasUnavailableConflict(dayKey, slot, durationMinutes, ignoredBlockI
   const proposedEnd = slot + durationMinutes;
   return unavailableBlocksForDays([{ key: dayKey }]).some((block) => {
     if (block.id === ignoredBlockId) return false;
+    if (!unavailableBlockBlocksBooking(block)) return false;
     const blockStart = unavailableBlockStartSlot(block);
     const blockEnd = unavailableBlockEndSlot(block);
     return slot < blockEnd && proposedEnd > blockStart;
@@ -8556,6 +8561,10 @@ function allUnavailableBlocks() {
 
 function unavailableBlockIsReadOnly(block = {}) {
   return Boolean(block.readOnly || block.syncSource === "cliniko" || block.clinikoUnavailableBlockId);
+}
+
+function unavailableBlockBlocksBooking(block = {}) {
+  return !unavailableBlockIsReadOnly(block);
 }
 
 function unavailableBlockDayKey(block) {

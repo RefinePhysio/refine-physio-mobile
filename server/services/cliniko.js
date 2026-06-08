@@ -116,7 +116,7 @@ export function clinikoEndpointSummary() {
     practitionerWorkingHours: "GET /practitioners/{practitioner_id}/daily_availabilities filtered by active business_id",
     appointmentTypes: "GET /appointment_types, GET /appointment_types/{id}",
     appointments: "GET /individual_appointments filtered by business_id, practitioner_id, and date range; optional POST /individual_appointments for app-created bookings; optional PATCH /individual_appointments/{id} for appointment time/type write-back.",
-    unavailableBlocks: "GET /unavailable_blocks and GET /unavailable_block_types filtered by business_id, practitioner_id, and date range. Display-only Cliniko blocks are shown on the app calendar and stop bookings in that blocked time.",
+    unavailableBlocks: "GET /unavailable_blocks and GET /unavailable_block_types filtered by business_id, practitioner_id, and date range. Display-only Cliniko blocks are shown on the app calendar while local bookings can still be made in that time.",
     treatmentNotes: "Not enabled in Step 4 read-only sync.",
     patientAttachments: "Optional report and completed treatment note PDF upload: GET /patients/{patient_id}/attachment_presigned_post, POST S3 presigned URL, POST /patient_attachments.",
     webhooks: "No official Cliniko webhook endpoint found in the public API docs; use scheduled polling unless Cliniko support confirms otherwise."

@@ -4812,6 +4812,11 @@ label {
   filter: brightness(0.96);
 }
 
+.calendar-unavailable-block.is-read-only {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
 .calendar-unavailable-block[data-block-kind="travel"] {
   background: repeating-linear-gradient(
     135deg,
