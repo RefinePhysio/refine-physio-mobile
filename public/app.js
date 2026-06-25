@@ -6725,7 +6725,11 @@ function bindViewEvents() {
   document.querySelector("#appointment-reschedule-form")?.addEventListener("submit", submitAppointmentReschedule);
   document.querySelector("#calendar-booking-form")?.addEventListener("submit", submitCalendarBooking);
   document.querySelector("#unavailable-block-form")?.addEventListener("submit", submitUnavailableBlock);
-  document.querySelector("#note-form")?.addEventListener("submit", submitNote);
+  const noteForm = document.querySelector("#note-form");
+  if (noteForm) {
+    bindNoteSubmitModeTracking(noteForm);
+    noteForm.addEventListener("submit", submitNote);
+  }
   document.querySelector("#report-form")?.addEventListener("submit", submitReport);
   document.querySelector("#report-reminder-form")?.addEventListener("submit", submitReportReminder);
   document.querySelector("#message-form")?.addEventListener("submit", submitMessage);
@@ -7008,25 +7012,45 @@ function applyAppointmentLocalUpdate(appointmentId, updates = {}) {
   return appointment;
 }
 
-function setFormSubmitting(form, isSubmitting, label = "Saving...") {
+function bindNoteSubmitModeTracking(form) {
+  form.querySelectorAll("button[type='submit'][name='mode']").forEach((button) => {
+    const rememberMode = () => {
+      form.dataset.submitMode = button.value || "draft";
+    };
+    button.addEventListener("pointerdown", rememberMode);
+    button.addEventListener("click", rememberMode);
+  });
+}
+
+function setFormSubmitting(form, isSubmitting, label = "Saving...", activeButton = null) {
   if (!form) return;
-  const button = form.querySelector("button[type='submit']");
+  const buttons = [...form.querySelectorAll("button[type='submit']")];
   form.classList.toggle("is-submitting", isSubmitting);
   form.setAttribute("aria-busy", isSubmitting ? "true" : "false");
-  if (!button) return;
+  if (isSubmitting) {
+    form.dataset.submitting = "true";
+  } else {
+    delete form.dataset.submitting;
+  }
+  if (!buttons.length) return;
 
   if (isSubmitting) {
-    button.dataset.originalText ||= button.textContent.trim();
-    button.textContent = label;
-    button.disabled = true;
+    const targetButton = activeButton && form.contains(activeButton) ? activeButton : buttons[0];
+    buttons.forEach((button) => {
+      button.dataset.originalText ||= button.textContent.trim();
+      button.disabled = true;
+      if (button === targetButton) button.textContent = label;
+    });
     return;
   }
 
-  button.disabled = false;
-  if (button.dataset.originalText) {
-    button.textContent = button.dataset.originalText;
-    delete button.dataset.originalText;
-  }
+  buttons.forEach((button) => {
+    button.disabled = false;
+    if (button.dataset.originalText) {
+      button.textContent = button.dataset.originalText;
+      delete button.dataset.originalText;
+    }
+  });
 }
 
 function focusCalendarBookingField() {
@@ -7135,36 +7159,68 @@ async function submitAppointmentReschedule(event) {
 async function submitNote(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const mode = event.submitter?.value || "draft";
-  const payload = formPayload(form);
-  payload.fields = fieldPayload(form);
-  payload.status = mode === "signed" ? "signed" : "draft";
+  if (form.dataset.submitting === "true") return;
 
-  if (mode === "offline") {
-    localStorage.setItem(offlineKey(payload.appointmentId), JSON.stringify({ ...payload, savedAt: new Date().toISOString() }));
-    toast("Offline draft saved on this device");
-    render();
-    return;
-  }
+  const mode = event.submitter?.value || form.dataset.submitMode || "draft";
+  const submitter = event.submitter || [...form.querySelectorAll("button[type='submit'][name='mode']")].find((button) => button.value === mode);
+  const submittingLabel = mode === "signed" ? "Signing..." : mode === "offline" ? "Saving offline..." : "Saving...";
+  setFormSubmitting(form, true, submittingLabel, submitter);
 
-  const saved = await fetchJson("/api/treatment-notes", { method: "POST", body: payload });
-  localStorage.removeItem(offlineKey(payload.appointmentId));
-  const appointment = state.data.appointments.find((item) => item.id === payload.appointmentId);
-  const signedReportCopy = saved.status === "signed" && appointment && appointmentRequiresReport(appointment);
-  if (saved.status === "signed") {
-    state.expandedSignedNoteAppointmentId = "";
-    state.activeAppointmentId = nextIncompleteNoteAppointmentId(payload.appointmentId);
+  try {
+    const payload = formPayload(form);
+    payload.fields = fieldPayload(form);
+    payload.status = mode === "signed" ? "signed" : "draft";
+
+    if (mode === "offline") {
+      localStorage.setItem(offlineKey(payload.appointmentId), JSON.stringify({ ...payload, savedAt: new Date().toISOString() }));
+      toast("Offline draft saved on this device");
+      render();
+      return;
+    }
+
+    const saved = await fetchJson("/api/treatment-notes", { method: "POST", body: payload });
+    localStorage.removeItem(offlineKey(payload.appointmentId));
+    applyTreatmentNoteLocalUpdate(saved);
+    const appointment = state.data.appointments.find((item) => item.id === payload.appointmentId);
+    const signedReportCopy = saved.status === "signed" && appointment && appointmentRequiresReport(appointment);
+    if (saved.status === "signed") {
+      state.expandedSignedNoteAppointmentId = "";
+      state.activeAppointmentId = nextIncompleteNoteAppointmentId(payload.appointmentId);
+    }
+    toast(treatmentNoteSaveMessage(saved, signedReportCopy));
+    await loadData();
+  } catch (error) {
+    toast(error.message || "Could not save treatment note");
+  } finally {
+    setFormSubmitting(form, false);
+    delete form.dataset.submitMode;
   }
-  toast(treatmentNoteSaveMessage(saved, signedReportCopy));
-  await loadData();
 }
 
 function treatmentNoteSaveMessage(saved, signedReportCopy) {
   if (saved.status !== "signed") return "Draft saved";
   if (saved.clinikoUploadStatus === "synced") return "Notes completed and uploaded to Cliniko files";
   if (saved.clinikoUploadStatus === "failed") return "Notes completed, but Cliniko file upload failed";
+  if (saved.clinikoUploadStatus === "pending") return "Notes completed; Cliniko upload is running";
   if (signedReportCopy) return "Notes completed and report sent to admin";
   return "Notes completed";
+}
+
+function applyTreatmentNoteLocalUpdate(saved) {
+  if (!state.data || !saved?.id) return;
+  state.data.treatmentNotes ||= [];
+  const existingIndex = state.data.treatmentNotes.findIndex((note) => note.id === saved.id);
+  if (existingIndex >= 0) {
+    state.data.treatmentNotes[existingIndex] = { ...state.data.treatmentNotes[existingIndex], ...saved };
+  } else {
+    state.data.treatmentNotes.push(saved);
+  }
+
+  const appointment = state.data.appointments.find((item) => item.id === saved.appointmentId);
+  if (appointment && saved.status === "signed") {
+    appointment.notesComplete = true;
+    if (appointment.status !== "cancelled") appointment.status = "completed";
+  }
 }
 
 async function submitReport(event) {

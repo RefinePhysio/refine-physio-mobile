@@ -814,8 +814,10 @@ async function routeApi(req, res, url) {
     if (appointment && !canAccessAppointment(db, auth.user, appointment)) return sendJson(res, 403, { error: "You do not have access to this appointment." });
     if (auth.user.role === "contractor") body.contractorId = auth.user.id;
     const note = await upsertTreatmentNote(db, body);
+    const shouldQueueNoteUpload = markTreatmentNoteUploadPending(note);
     await writeDb(db);
     sendJson(res, body.id ? 200 : 201, note);
+    if (shouldQueueNoteUpload) queueTreatmentNoteUpload(note.id, note.contractorId);
     return;
   }
 
@@ -2276,13 +2278,104 @@ async function upsertTreatmentNote(db, body) {
       });
     }
 
-    if (getClinikoConfig().noteUploadAutoEnabled) {
-      await uploadCompletedTreatmentNoteToCliniko(db, note.id, note.contractorId);
-    }
   }
 
   logActivity(db, note.contractorId, note.status === "signed" ? "signed_treatment_note" : "saved_treatment_note", "treatmentNote", note.id);
   return note;
+}
+
+const treatmentNoteUploadFields = [
+  "clinikoPatientId",
+  "clinikoUploadStatus",
+  "clinikoUploadError",
+  "clinikoUploadQueuedAt",
+  "clinikoAttachmentId",
+  "clinikoAttachmentFilename",
+  "clinikoAttachmentUploadedAt",
+  "clinikoAttachmentProcessingCompleted",
+  "clinikoUploadSource",
+  "updatedAt"
+];
+
+function markTreatmentNoteUploadPending(note) {
+  const current = getClinikoConfig();
+  if (!note || note.status !== "signed" || !current.noteUploadAutoEnabled) return false;
+  if (note.clinikoAttachmentId && note.clinikoUploadStatus === "synced" && note.clinikoAttachmentProcessingCompleted) return false;
+  note.clinikoUploadStatus = "pending";
+  note.clinikoUploadError = "";
+  note.clinikoUploadQueuedAt = new Date().toISOString();
+  return true;
+}
+
+function queueTreatmentNoteUpload(noteId, actorId) {
+  setTimeout(() => {
+    void runTreatmentNoteUploadJob(noteId, actorId);
+  }, 0);
+}
+
+async function runTreatmentNoteUploadJob(noteId, actorId) {
+  try {
+    const uploadDb = await readDb();
+    await uploadCompletedTreatmentNoteToCliniko(uploadDb, noteId, actorId);
+    await mergeTreatmentNoteUploadResult(uploadDb, noteId);
+  } catch (error) {
+    console.error(error);
+    await markTreatmentNoteUploadFailed(noteId, error);
+  }
+}
+
+async function mergeTreatmentNoteUploadResult(sourceDb, noteId) {
+  const latestDb = await readDb();
+  const sourceNote = sourceDb.treatmentNotes.find((item) => item.id === noteId);
+  const targetNote = latestDb.treatmentNotes.find((item) => item.id === noteId);
+  if (sourceNote && targetNote) {
+    Object.assign(targetNote, pick(sourceNote, treatmentNoteUploadFields));
+    mergeClinikoPatientLink(latestDb, sourceDb, sourceNote);
+  }
+
+  appendNewRecords(latestDb.clinikoSyncLogs, sourceDb.clinikoSyncLogs, 200);
+  appendNewRecords(latestDb.syncErrors, sourceDb.syncErrors, 200);
+  appendNewRecords(latestDb.activityLog, sourceDb.activityLog);
+  await writeDb(latestDb);
+}
+
+function mergeClinikoPatientLink(targetDb, sourceDb, note) {
+  const sourceClient = sourceDb.clients.find((item) => item.id === note.clientId);
+  const targetClient = targetDb.clients.find((item) => item.id === note.clientId);
+  if (sourceClient?.clinikoPatientId && targetClient && !targetClient.clinikoPatientId) {
+    targetClient.clinikoPatientId = sourceClient.clinikoPatientId;
+  }
+
+  const sourceAppointment = sourceDb.appointments.find((item) => item.id === note.appointmentId);
+  const targetAppointment = targetDb.appointments.find((item) => item.id === note.appointmentId);
+  if (sourceAppointment?.clinikoPatientId && targetAppointment && !targetAppointment.clinikoPatientId) {
+    targetAppointment.clinikoPatientId = sourceAppointment.clinikoPatientId;
+  }
+}
+
+function appendNewRecords(target = [], source = [], maxLength = Infinity) {
+  const ids = new Set(target.map((item) => item.id).filter(Boolean));
+  for (const item of source || []) {
+    if (!item?.id || ids.has(item.id)) continue;
+    target.push(item);
+    ids.add(item.id);
+  }
+  if (Number.isFinite(maxLength) && target.length > maxLength) target.splice(0, target.length - maxLength);
+}
+
+async function markTreatmentNoteUploadFailed(noteId, error) {
+  try {
+    const db = await readDb();
+    const note = db.treatmentNotes.find((item) => item.id === noteId);
+    if (!note) return;
+    note.clinikoUploadStatus = "failed";
+    note.clinikoUploadError = error?.message || "Cliniko note upload failed.";
+    note.updatedAt = new Date().toISOString();
+    logActivity(db, note.contractorId, "failed_note_to_cliniko", "treatmentNote", note.id);
+    await writeDb(db);
+  } catch (writeError) {
+    console.error(writeError);
+  }
 }
 
 async function uploadCompletedTreatmentNoteToCliniko(db, noteId, actorId = "admin-jenni") {
