@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -48,6 +48,7 @@ const dataDir = process.env.REFINE_DATA_DIR
   : path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "db.json");
 const seedPath = path.join(__dirname, "data", "seed.json");
+const reportPhotoDir = path.join(dataDir, "report-photos");
 const port = Number(process.env.PORT || 4173);
 assertSafeProductionConfig();
 
@@ -104,6 +105,9 @@ const reportTemplates = [
   }
 ];
 
+const REPORT_PHOTO_LIMIT = 8;
+const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 2200000;
+const REPORT_PHOTO_FILE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const REPORT_CLOSING_MESSAGE = "Thank you again for your kind referral! If you have any questions, please feel free to call (07) 3216 1330 or email hello@refinehealthgroup.com.au.";
 const SIGNATURE_MAX_DATA_URL_LENGTH = 450000;
 const AI_REPORT_SECTION_MAX_CHARS = 5000;
@@ -115,6 +119,7 @@ const referralStatuses = ["new", "contacted", "assigned", "booked", "active", "p
 let clinikoSyncInFlight = null;
 
 await ensureDb();
+await migrateReportPhotosToFileStorage();
 
 const server = createServer(async (req, res) => {
   try {
@@ -182,6 +187,15 @@ async function ensureDb() {
       await copyFile(seedPath, dbPath);
     }
   }
+}
+
+async function migrateReportPhotosToFileStorage() {
+  const db = await readDb();
+  let changed = false;
+  for (const report of db.reports || []) {
+    changed = await persistReportPhotoDataUrls(report) || changed;
+  }
+  if (changed) await writeDb(db);
 }
 
 async function readDb() {
@@ -273,9 +287,19 @@ function normalizeDb(db) {
   maybeResetTestClinikoDataForRealSync(db);
   normalizeCaseManagers(db);
   pruneExpiredSessions(db);
+  compactRuntimeCollections(db);
   normalizeAppointmentApprovalState(db);
   syncInboxItems(db);
   return db;
+}
+
+function compactRuntimeCollections(db) {
+  db.activityLog = (db.activityLog || []).slice(-500);
+  db.clinikoSyncLogs = (db.clinikoSyncLogs || []).slice(-200);
+  db.syncErrors = (db.syncErrors || []).slice(-200);
+  for (const report of db.reports || []) {
+    report.fields = normalizeReportFields(report.fields || {}, report.type);
+  }
 }
 
 function maybeResetTestClinikoDataForRealSync(db) {
@@ -468,7 +492,7 @@ function startClinikoPolling() {
   if (!config.connected || !config.pollEnabled) return;
 
   const intervalMs = config.pollingIntervalSeconds
-    ? Math.max(config.pollingIntervalSeconds, 15) * 1000
+    ? Math.max(config.pollingIntervalSeconds, 60) * 1000
     : Math.max(config.pollingIntervalMinutes || 5, 1) * 60 * 1000;
   const pollCliniko = async () => {
     try {
@@ -478,7 +502,7 @@ function startClinikoPolling() {
     }
   };
 
-  pollCliniko();
+  setTimeout(pollCliniko, 10000).unref?.();
   setInterval(pollCliniko, intervalMs).unref?.();
 }
 
@@ -592,6 +616,15 @@ async function routeApi(req, res, url) {
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     sendJson(res, 200, buildBootstrap(db, auth.user.id));
+    return;
+  }
+
+  if (method === "GET" && parts[1] === "report-photos" && parts[2]) {
+    const photo = reportPhotoForUser(db, auth.user, parts[2]);
+    if (!photo) return sendText(res, 404, "Report photo not found");
+    const buffer = reportPhotoBuffer(photo);
+    if (!buffer) return sendText(res, 404, "Report photo not found");
+    sendJpeg(res, 200, buffer);
     return;
   }
 
@@ -898,6 +931,15 @@ async function routeApi(req, res, url) {
     if (!report) return sendText(res, 404, "Report not found");
     if (!canAccessReport(auth.user, report)) return sendText(res, 403, "Forbidden");
     sendPdf(res, 200, renderReportPdfBuffer(db, report, { hideCaseManagerDetails: auth.user.role === "contractor" }), reportDownloadFilename(db, report));
+    return;
+  }
+
+  if (method === "GET" && parts[1] === "reports" && parts[2] && !parts[3]) {
+    const report = db.reports.find((item) => item.id === parts[2]);
+    if (!report) return sendJson(res, 404, { error: "Report not found" });
+    if (!canAccessReport(auth.user, report)) return sendJson(res, 403, { error: "Forbidden" });
+    const visibleReport = auth.user.role === "contractor" ? stripCaseManagerFromReport(report) : report;
+    sendJson(res, 200, reportForBootstrap(visibleReport));
     return;
   }
 
@@ -1788,7 +1830,7 @@ function buildBootstrap(db, userId) {
     unavailableBlocks,
     archivedAppointments: isOperations ? archivedPhysioAppointments : [],
     treatmentNotes: treatmentNotesForRole,
-    reports: reportsForRole,
+    reports: reportsForRole.map(reportForBootstrap),
     approvalRequests,
     rebookStatuses,
     inboxItems,
@@ -1912,6 +1954,40 @@ function stripCaseManagerFromReport(report = {}) {
     ...safeReport,
     fields: stripCaseManagerFields(report.fields || {})
   };
+}
+
+function reportForBootstrap(report = {}) {
+  return {
+    ...report,
+    fields: reportFieldsForClient(report.fields || {})
+  };
+}
+
+function reportFieldsForClient(fields = {}) {
+  const safeFields = { ...(fields || {}) };
+  if (safeFields.photoAttachments !== undefined) {
+    safeFields.photoAttachments = normalizeReportPhotoAttachments(safeFields.photoAttachments)
+      .map((photo) => {
+        const { dataUrl, ...safePhoto } = photo;
+        return {
+          ...safePhoto,
+          url: reportPhotoUrl(photo),
+          hasDataUrl: Boolean(dataUrl || photo.fileId)
+        };
+      });
+  }
+  return safeFields;
+}
+
+function reportPhotoForUser(db, user, fileId) {
+  const safeFileId = sanitizeReportPhotoFileId(fileId);
+  if (!safeFileId) return null;
+  for (const report of db.reports || []) {
+    if (!canAccessReport(user, report)) continue;
+    const photo = reportPhotoAttachmentsFromFields(report.fields || {}).find((item) => item.fileId === safeFileId);
+    if (photo) return photo;
+  }
+  return null;
 }
 
 function stripCaseManagerFields(fields = {}) {
@@ -2450,6 +2526,8 @@ async function upsertReport(db, body) {
     appointment.reportDue = false;
   }
 
+  await persistReportPhotoDataUrls(report);
+
   const actor = db.users.find((user) => user.id === body.actorId);
   const submittedForAdminReview = body.submittedForAdminReview === true || body.submittedForAdminReview === "true";
   if (completedStatus && (actor?.role !== "admin" || submittedForAdminReview)) {
@@ -2648,37 +2726,103 @@ function normalizeReportFields(fields = {}, reportType = "") {
 }
 
 function normalizeReportPhotoAttachments(value) {
-  let parsed = [];
-
-  if (Array.isArray(value)) {
-    parsed = value;
-  } else if (typeof value === "string" && value.trim()) {
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      parsed = [];
-    }
-  }
-
-  return parsed
-    .filter((photo) => photo && typeof photo === "object" && /^data:image\/jpe?g;base64,/i.test(String(photo.dataUrl || "")))
-    .slice(0, 8)
-    .map((photo, index) => ({
-      id: String(photo.id || `photo-${index + 1}`).slice(0, 80),
-      order: index + 1,
-      name: String(photo.name || `Photo ${index + 1}`).slice(0, 80),
-      mimeType: "image/jpeg",
-      width: clampNumber(photo.width, 1, 5000, 1200),
-      height: clampNumber(photo.height, 1, 5000, 900),
-      dataUrl: String(photo.dataUrl || "").slice(0, 2200000),
-      note: String(photo.note || "").slice(0, 600),
-      addedAt: String(photo.addedAt || "").slice(0, 40)
-    }))
-    .filter((photo) => photo.dataUrl.length < 2200000);
+  return parseReportPhotoAttachments(value)
+    .filter((photo) => photo && typeof photo === "object")
+    .slice(0, REPORT_PHOTO_LIMIT)
+    .map((photo, index) => {
+      const dataUrl = sanitizeReportPhotoDataUrl(photo.dataUrl);
+      const fileId = sanitizeReportPhotoFileId(photo.fileId);
+      if (!dataUrl && !fileId) return null;
+      return {
+        id: String(photo.id || `photo-${index + 1}`).slice(0, 80),
+        order: index + 1,
+        name: String(photo.name || `Photo ${index + 1}`).slice(0, 80),
+        mimeType: "image/jpeg",
+        width: clampNumber(photo.width, 1, 5000, 1200),
+        height: clampNumber(photo.height, 1, 5000, 900),
+        dataUrl,
+        fileId,
+        url: fileId ? reportPhotoUrl({ fileId }) : "",
+        note: String(photo.note || "").slice(0, 600),
+        addedAt: String(photo.addedAt || "").slice(0, 40)
+      };
+    })
+    .filter(Boolean);
 }
 
 function reportPhotoAttachmentsFromFields(fields = {}) {
   return normalizeReportPhotoAttachments(fields.photoAttachments);
+}
+
+function parseReportPhotoAttachments(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function sanitizeReportPhotoDataUrl(value) {
+  const dataUrl = String(value || "").trim();
+  if (!dataUrl || dataUrl.length > REPORT_PHOTO_MAX_DATA_URL_LENGTH) return "";
+  return /^data:image\/jpe?g;base64,[A-Za-z0-9+/=]+$/i.test(dataUrl) ? dataUrl : "";
+}
+
+function sanitizeReportPhotoFileId(value) {
+  const fileId = String(value || "").trim().toLowerCase();
+  return REPORT_PHOTO_FILE_ID_PATTERN.test(fileId) ? fileId : "";
+}
+
+function reportPhotoUrl(photo = {}) {
+  const fileId = sanitizeReportPhotoFileId(photo.fileId);
+  return fileId ? `/api/report-photos/${encodeURIComponent(fileId)}` : "";
+}
+
+async function persistReportPhotoDataUrls(report = {}) {
+  if (!report?.fields?.photoAttachments) return false;
+  const photos = normalizeReportPhotoAttachments(report.fields.photoAttachments);
+  let changed = false;
+  await mkdir(reportPhotoDir, { recursive: true });
+
+  for (const photo of photos) {
+    if (!photo.dataUrl) continue;
+    const match = photo.dataUrl.match(/^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/i);
+    if (!match) continue;
+    const fileId = photo.fileId || reportPhotoFileId(report, photo);
+    const filePath = reportPhotoPath(fileId);
+    await writeFile(filePath, Buffer.from(match[1], "base64"));
+    photo.fileId = fileId;
+    photo.url = reportPhotoUrl(photo);
+    photo.dataUrl = "";
+    changed = true;
+  }
+
+  if (changed) report.fields.photoAttachments = photos;
+  return changed;
+}
+
+function reportPhotoFileId(report = {}, photo = {}) {
+  const hash = createHash("sha256")
+    .update(`${report.id || "report"}|${photo.id || ""}|${photo.addedAt || ""}|${photo.dataUrl || ""}`)
+    .digest("hex")
+    .slice(0, 24);
+  const prefix = String(report.id || "report")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "report";
+  return `${prefix}-${hash}`.slice(0, 120);
+}
+
+function reportPhotoPath(fileId) {
+  const safeFileId = sanitizeReportPhotoFileId(fileId);
+  if (!safeFileId) throw new Error("Invalid report photo file id.");
+  return path.join(reportPhotoDir, `${safeFileId}.jpg`);
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -3195,7 +3339,7 @@ function renderReportHtml(db, report, options = {}) {
       <div class="photo-grid">
         ${photos.map((photo, index) => `
           <figure>
-            <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(`Photo ${index + 1}`)}">
+            <img src="${escapeHtml(reportPhotoDisplaySrc(photo))}" alt="${escapeHtml(`Photo ${index + 1}`)}">
             <figcaption>${escapeHtml(`Photo ${index + 1}${photo.name ? ` - ${photo.name}` : ""}`)}</figcaption>
             ${photo.note ? `<p>${escapeHtml(photo.note)}</p>` : ""}
           </figure>
@@ -4270,10 +4414,8 @@ function renderSimplePdf(lines, photoAttachments = []) {
 function pdfImageAttachments(photoAttachments = []) {
   return normalizeReportPhotoAttachments(photoAttachments)
     .map((photo) => {
-      const match = String(photo.dataUrl || "").match(/^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/i);
-      if (!match) return null;
-      const buffer = Buffer.from(match[1], "base64");
-      if (!buffer.length) return null;
+      const buffer = reportPhotoBuffer(photo);
+      if (!buffer?.length) return null;
       return {
         name: photo.name || "Photo",
         note: photo.note || "",
@@ -4283,6 +4425,21 @@ function pdfImageAttachments(photoAttachments = []) {
       };
     })
     .filter(Boolean);
+}
+
+function reportPhotoBuffer(photo = {}) {
+  const match = String(photo.dataUrl || "").match(/^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/i);
+  if (match) return Buffer.from(match[1], "base64");
+
+  const fileId = sanitizeReportPhotoFileId(photo.fileId);
+  if (!fileId) return null;
+  const filePath = reportPhotoPath(fileId);
+  if (!existsSync(filePath)) return null;
+  return readFileSync(filePath);
+}
+
+function reportPhotoDisplaySrc(photo = {}) {
+  return photo.dataUrl || reportPhotoUrl(photo);
 }
 
 function pdfSignatureImageFromUser(user = {}) {
@@ -4428,6 +4585,15 @@ function sendPdf(res, status, buffer, filename) {
     "Content-Type": "application/pdf",
     "Content-Disposition": `attachment; filename="${String(filename || "report.pdf").replace(/"/g, "")}"`,
     "Cache-Control": "no-store"
+  });
+  res.end(buffer);
+}
+
+function sendJpeg(res, status, buffer) {
+  res.writeHead(status, {
+    ...securityHeaders(),
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "private, max-age=3600"
   });
   res.end(buffer);
 }

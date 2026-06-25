@@ -1,5 +1,5 @@
 const app = document.querySelector("#app");
-const AUTO_REFRESH_MS = 15000;
+const AUTO_REFRESH_MS = 30000;
 const AUTO_REFRESH_RENDER_TABS = new Set([
   "overview",
   "inbox",
@@ -12,9 +12,9 @@ const AUTO_REFRESH_RENDER_TABS = new Set([
   "clients"
 ]);
 const REPORT_PHOTO_LIMIT = 8;
-const REPORT_PHOTO_MAX_EDGE = 1400;
-const REPORT_PHOTO_QUALITY = 0.76;
-const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 2200000;
+const REPORT_PHOTO_MAX_EDGE = 1000;
+const REPORT_PHOTO_QUALITY = 0.68;
+const REPORT_PHOTO_MAX_DATA_URL_LENGTH = 900000;
 let browserNavigationBound = false;
 
 const state = {
@@ -3918,7 +3918,7 @@ function renderReportPhotoAttachments(fields = {}) {
             ${photos.map((photo, index) => `
               <article class="report-photo-preview">
                 <div class="report-photo-frame">
-                  <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(`Photo ${index + 1}`)}">
+                  <img src="${escapeHtml(reportPhotoImageSrc(photo))}" alt="${escapeHtml(`Photo ${index + 1}`)}">
                   <span class="photo-index-badge">${index + 1}</span>
                 </div>
                 <div>
@@ -6482,17 +6482,24 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-action='open-report']").forEach((button) => {
-    button.addEventListener("click", () => {
-      const report = state.data.reports.find((item) => item.id === button.dataset.id);
-      if (!report) return;
-      state.reportClientId = report.clientId;
-      state.reportContractorId = report.contractorId;
-      state.reportAppointmentId = report.appointmentId || "";
-      state.reportType = report.type;
-      state.patientFileClientId = "";
-      resetReportDraftState();
-      setActiveTab("reports");
-      render();
+    button.addEventListener("click", async () => {
+      const reportId = button.dataset.id || "";
+      const fallbackReport = state.data.reports.find((item) => item.id === reportId);
+      if (!fallbackReport) return;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "Opening...";
+      try {
+        const report = await fetchJson(`/api/reports/${encodeURIComponent(reportId)}`);
+        applyReportLocalUpdate(report);
+        openReportForEditing(report);
+      } catch (error) {
+        toast(error.message || "Could not open report");
+        openReportForEditing(fallbackReport);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
     });
   });
 
@@ -7012,6 +7019,29 @@ function applyAppointmentLocalUpdate(appointmentId, updates = {}) {
   return appointment;
 }
 
+function applyReportLocalUpdate(saved) {
+  if (!state.data || !saved?.id) return;
+  state.data.reports ||= [];
+  const existingIndex = state.data.reports.findIndex((report) => report.id === saved.id);
+  if (existingIndex >= 0) {
+    state.data.reports[existingIndex] = { ...state.data.reports[existingIndex], ...saved };
+  } else {
+    state.data.reports.push(saved);
+  }
+}
+
+function openReportForEditing(report) {
+  if (!report) return;
+  state.reportClientId = report.clientId;
+  state.reportContractorId = report.contractorId;
+  state.reportAppointmentId = report.appointmentId || "";
+  state.reportType = report.type;
+  state.patientFileClientId = "";
+  resetReportDraftState();
+  setActiveTab("reports");
+  render();
+}
+
 function bindNoteSubmitModeTracking(form) {
   form.querySelectorAll("button[type='submit'][name='mode']").forEach((button) => {
     const rememberMode = () => {
@@ -7236,6 +7266,7 @@ async function submitReport(event) {
   payload.actorId = state.data.currentUser.id;
   payload.submittedForAdminReview = mode === "ready_for_admin" && (state.data.currentUser.role === "contractor" || ownerViewingPractitioner());
   const saved = await fetchJson("/api/reports", { method: "POST", body: payload });
+  applyReportLocalUpdate(saved);
   resetReportDraftState();
   const sentToAdmin = payload.submittedForAdminReview;
   if (sentToAdmin) {
@@ -7556,20 +7587,34 @@ function reportPhotoAttachmentsFromFields(fields = {}) {
   }
 
   return parsed
-    .filter((photo) => photo && typeof photo === "object" && String(photo.dataUrl || "").startsWith("data:image/jpeg;base64,"))
+    .filter((photo) => photo && typeof photo === "object")
     .slice(0, REPORT_PHOTO_LIMIT)
-    .map((photo, index) => ({
-      id: String(photo.id || `photo-${index + 1}`),
-      order: index + 1,
-      name: String(photo.name || `Photo ${index + 1}`).slice(0, 80),
-      mimeType: "image/jpeg",
-      width: Number(photo.width || 0),
-      height: Number(photo.height || 0),
-      dataUrl: String(photo.dataUrl || "").slice(0, REPORT_PHOTO_MAX_DATA_URL_LENGTH),
-      note: String(photo.note || "").slice(0, 600),
-      addedAt: photo.addedAt || ""
-    }))
-    .filter((photo) => photo.dataUrl.length < REPORT_PHOTO_MAX_DATA_URL_LENGTH);
+    .map((photo, index) => {
+      const dataUrl = String(photo.dataUrl || "");
+      const fileId = String(photo.fileId || "").trim();
+      const url = String(photo.url || "").trim();
+      const hasInlineImage = dataUrl.startsWith("data:image/jpeg;base64,") && dataUrl.length < REPORT_PHOTO_MAX_DATA_URL_LENGTH;
+      const hasStoredImage = Boolean(fileId || url.startsWith("/api/report-photos/"));
+      if (!hasInlineImage && !hasStoredImage) return null;
+      return {
+        id: String(photo.id || `photo-${index + 1}`),
+        order: index + 1,
+        name: String(photo.name || `Photo ${index + 1}`).slice(0, 80),
+        mimeType: "image/jpeg",
+        width: Number(photo.width || 0),
+        height: Number(photo.height || 0),
+        dataUrl: hasInlineImage ? dataUrl : "",
+        fileId,
+        url: url || (fileId ? `/api/report-photos/${encodeURIComponent(fileId)}` : ""),
+        note: String(photo.note || "").slice(0, 600),
+        addedAt: photo.addedAt || ""
+      };
+    })
+    .filter(Boolean);
+}
+
+function reportPhotoImageSrc(photo = {}) {
+  return photo.dataUrl || photo.url || "";
 }
 
 function reportPhotoSizeLabel(photo) {
